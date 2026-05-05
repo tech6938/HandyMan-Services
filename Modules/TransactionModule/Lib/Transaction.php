@@ -2334,11 +2334,9 @@ if (!function_exists('refundTransactionForCanceledBooking')) {
 
     function refundTransactionForCanceledBooking($booking): void
     {
-        // Prevent duplicate refunds
+        // Prevent duplicate refunds - check if refund transaction already exists for this booking
         $refundAlreadyProcessed = Transaction::where('booking_id', $booking['id'])
             ->where('trx_type', TRX_TYPE['booking_refund'])
-            ->where('to_user_id', $booking->customer_id)
-            ->where('to_user_account', 'user_wallet')
             ->exists();
 
         if ($refundAlreadyProcessed) {
@@ -2349,7 +2347,7 @@ if (!function_exists('refundTransactionForCanceledBooking')) {
         $isChildBooking = !is_null($booking->parent_booking_id);
 
         if ($isChildBooking) {
-            // Calculate refund for child booking
+            // Single service (child booking) cancelled - calculate proportional refund for this service only
             $parentBooking = $booking->parentBooking;
 
             // Get total paid amount for parent booking
@@ -2377,21 +2375,31 @@ if (!function_exists('refundTransactionForCanceledBooking')) {
                 $refund_amount = round($refund_amount, 2);
             }
         } else {
-            // Calculate refund for parent booking (full cancellation)
+            // Parent booking cancelled - calculate refund amount for remaining unpaid/refundable service value
+            $totalPaidAmount = 0;
             if ($booking->booking_partial_payments->isEmpty()) {
                 if ($booking->payment_method == 'offline_payment' && $booking->is_paid) {
-                    $refund_amount = $booking['total_booking_amount'];
+                    $totalPaidAmount = $booking['total_booking_amount'];
                 } elseif ($booking->payment_method != 'offline_payment' && $booking->payment_method != 'cash_after_service') {
-                    $refund_amount = $booking['total_booking_amount'];
+                    $totalPaidAmount = $booking['total_booking_amount'];
                 }
             } else {
                 if ($booking->payment_method == 'offline_payment' && $booking->is_paid) {
-                    $refund_amount = $booking->booking_partial_payments->sum('paid_amount');
+                    $totalPaidAmount = $booking->booking_partial_payments->sum('paid_amount');
                 } elseif ($booking->payment_method == 'offline_payment' && !$booking->is_paid) {
-                    $refund_amount = $booking->booking_partial_payments->where('paid_with', '!=', 'offline_payment')->sum('paid_amount');
+                    $totalPaidAmount = $booking->booking_partial_payments->where('paid_with', '!=', 'offline_payment')->sum('paid_amount');
                 } elseif ($booking->payment_method != 'offline_payment') {
-                    $refund_amount = $booking->booking_partial_payments->where('paid_with', '!=', 'cash_after_service')->sum('paid_amount');
+                    $totalPaidAmount = $booking->booking_partial_payments->where('paid_with', '!=', 'cash_after_service')->sum('paid_amount');
                 }
+            }
+
+            $refundBookingIds = array_merge([$booking['id']], $booking->childBookings()->pluck('id')->toArray());
+            $alreadyRefunded = Transaction::whereIn('booking_id', $refundBookingIds)
+                ->where('trx_type', TRX_TYPE['booking_refund'])
+                ->sum('credit');
+
+            if ($totalPaidAmount > 0) {
+                $refund_amount = max(0, round($totalPaidAmount - $alreadyRefunded, 2));
             }
         }
 

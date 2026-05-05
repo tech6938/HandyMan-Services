@@ -626,6 +626,9 @@ class BookingController extends Controller
         if ($booking->booking_status == 'completed' && $request['booking_status'] == 'canceled') {
             return response()->json(response_formatter(BOOKING_ALREADY_COMPLETED), 200);
         }
+        if ($booking->booking_status == 'canceled' && $request['booking_status'] == 'canceled') {
+            return response()->json(response_formatter(BOOKING_ALREADY_CANCELED_200), 200);
+        }
 
         $booking->booking_status = $request['booking_status'];
 
@@ -636,15 +639,16 @@ class BookingController extends Controller
 
         DB::transaction(function () use ($bookingStatusHistory, $booking, $request) {
 
-            // Parent booking cancel karo
+            // Parent booking cancel karo - refund will be processed here
             $booking->save();
             $bookingStatusHistory->save();
 
-            // Sari child bookings bhi cancel karo
+            // Sari child bookings bhi cancel karo - skip refund for children
             if ($booking->childBookings->isNotEmpty()) {
                 foreach ($booking->childBookings as $child) {
                     if (!in_array($child->booking_status, ['completed', 'canceled'])) {
                         $child->booking_status = 'canceled';
+                        $child->skip_refund = true; // Skip refund for child, parent will handle it
                         $child->save();
 
                         $childHistory = new BookingStatusHistory();
@@ -723,7 +727,6 @@ class BookingController extends Controller
         $bookingStatusHistory->booking_status = $request['booking_status'];
 
         DB::transaction(function () use ($bookingStatusHistory, $childBooking, $request) {
-            // Cancel the child booking - this will trigger refund automatically
             $childBooking->save();
             $bookingStatusHistory->save();
 
@@ -743,10 +746,8 @@ class BookingController extends Controller
 
                 // Determine new parent status
                 if ($canceledCount == $total) {
-                    // All children cancelled - parent becomes cancelled
-                    // But don't trigger another refund since children already refunded
-                    $parentBooking->skip_refund = true; // Flag to skip refund in model event
                     $parentBooking->booking_status = 'canceled';
+                    $parentBooking->skip_refund = true;
                     $parentBooking->save();
                 } elseif ($completedCount + $canceledCount == $total) {
                     // All children either completed or cancelled

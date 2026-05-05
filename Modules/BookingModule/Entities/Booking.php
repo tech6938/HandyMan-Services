@@ -46,6 +46,7 @@ class Booking extends Model
         'readable_id' => 'integer',
         'is_paid' => 'integer',
         'is_verified' => 'integer',
+        'skip_refund' => 'boolean',
         'total_booking_amount' => 'float',
         'total_tax_amount' => 'float',
         'total_discount_amount' => 'float',
@@ -92,7 +93,8 @@ class Booking extends Model
         'additional_campaign_discount_amount',
         'evidence_photos',
         'booking_otp',
-        'is_verified'
+        'is_verified',
+        'skip_refund'
     ];
 
     protected $appends = ['evidence_photos_full_path'];
