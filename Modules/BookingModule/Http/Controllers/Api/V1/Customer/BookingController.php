@@ -21,6 +21,8 @@ use Modules\BookingModule\Http\Traits\BookingTrait;
 use Modules\CustomerModule\Traits\CustomerAddressTrait;
 use Modules\PaymentModule\Entities\OfflinePayment;
 use Modules\PaymentModule\Entities\PaymentRequest;
+use Modules\TransactionModule\Entities\Account;
+use Modules\TransactionModule\Entities\Transaction;
 use Modules\UserManagement\Entities\User;
 
 class BookingController extends Controller
@@ -676,6 +678,7 @@ class BookingController extends Controller
     /**
      * Customer cancels a single service (child booking) from a multi-service booking
      */
+
     public function cancelSingleService(Request $request, string $childBookingId): JsonResponse
     {
         $validator = Validator::make($request->all(), [
@@ -688,10 +691,10 @@ class BookingController extends Controller
 
         // Find the child booking and ensure it belongs to the customer
         $childBooking = $this->booking
-            ->with(['parentBooking'])
+            ->with(['parentBooking.childBookings'])
             ->where('id', $childBookingId)
             ->where('customer_id', $request->user()->id)
-            ->whereNotNull('parent_booking_id') // Must be a child booking
+            ->whereNotNull('parent_booking_id')
             ->first();
 
         if (!isset($childBooking)) {
@@ -727,6 +730,9 @@ class BookingController extends Controller
             // Update parent booking status based on remaining children
             if ($childBooking->parentBooking) {
                 $parentBooking = $childBooking->parentBooking;
+
+                // Refresh parent booking with latest child bookings
+                $parentBooking->load('childBookings');
                 $allChildren = $parentBooking->childBookings;
                 $completedCount = $allChildren->where('booking_status', 'completed')->count();
                 $canceledCount = $allChildren->where('booking_status', 'canceled')->count();
@@ -737,19 +743,22 @@ class BookingController extends Controller
 
                 // Determine new parent status
                 if ($canceledCount == $total) {
+                    // All children cancelled - parent becomes cancelled
+                    // But don't trigger another refund since children already refunded
+                    $parentBooking->skip_refund = true; // Flag to skip refund in model event
                     $parentBooking->booking_status = 'canceled';
+                    $parentBooking->save();
                 } elseif ($completedCount + $canceledCount == $total) {
+                    // All children either completed or cancelled
                     $parentBooking->booking_status = 'completed';
                     $parentBooking->is_paid = 1;
+                    $parentBooking->save();
                 } elseif ($ongoingCount > 0 || $completedCount > 0) {
+                    // Some children are ongoing or completed
                     if (!in_array($parentBooking->booking_status, ['completed', 'canceled'])) {
                         $parentBooking->booking_status = 'ongoing';
+                        $parentBooking->save();
                     }
-                }
-
-                // Only save if status changed, but don't trigger refund again
-                if ($oldParentStatus != $parentBooking->booking_status) {
-                    $parentBooking->save(); // This won't trigger refund unless status becomes 'canceled'
                 }
 
                 // Save parent status change history
@@ -761,11 +770,9 @@ class BookingController extends Controller
             }
         });
 
-        // Return same response format as statusUpdate method
         return response()->json(response_formatter(BOOKING_STATUS_UPDATE_SUCCESS_200, $childBooking), 200);
     }
 
-    //
     // public function cancelSingleService(Request $request, string $childBookingId): JsonResponse
     // {
     //     $validator = Validator::make($request->all(), [
@@ -810,7 +817,7 @@ class BookingController extends Controller
     //     $bookingStatusHistory->booking_status = $request['booking_status'];
 
     //     DB::transaction(function () use ($bookingStatusHistory, $childBooking, $request) {
-    //         // Cancel the child booking
+    //         // Cancel the child booking - this will trigger refund automatically
     //         $childBooking->save();
     //         $bookingStatusHistory->save();
 
@@ -823,24 +830,26 @@ class BookingController extends Controller
     //             $ongoingCount = $allChildren->whereIn('booking_status', ['ongoing'])->count();
     //             $total = $allChildren->count();
 
+    //             $oldParentStatus = $parentBooking->booking_status;
+
     //             // Determine new parent status
     //             if ($canceledCount == $total) {
-    //                 // All children canceled
     //                 $parentBooking->booking_status = 'canceled';
     //             } elseif ($completedCount + $canceledCount == $total) {
-    //                 // All children are either completed or canceled
     //                 $parentBooking->booking_status = 'completed';
     //                 $parentBooking->is_paid = 1;
     //             } elseif ($ongoingCount > 0 || $completedCount > 0) {
-    //                 // Some services are ongoing or completed
     //                 if (!in_array($parentBooking->booking_status, ['completed', 'canceled'])) {
     //                     $parentBooking->booking_status = 'ongoing';
     //                 }
     //             }
 
-    //             $parentBooking->save();
+    //             // Only save if status changed, but don't trigger refund again
+    //             if ($oldParentStatus != $parentBooking->booking_status) {
+    //                 $parentBooking->save(); // This won't trigger refund unless status becomes 'canceled'
+    //             }
 
-    //             // Save parent status change history (optional but good for tracking)
+    //             // Save parent status change history
     //             $parentHistory = new BookingStatusHistory();
     //             $parentHistory->booking_id = $parentBooking->id;
     //             $parentHistory->changed_by = $request->user()->id;

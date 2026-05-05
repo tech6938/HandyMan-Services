@@ -43,24 +43,101 @@ class ReviewController extends Controller
         $booking_id = $request->booking_id;
         $customer_id = $request->user()->id;
 
-        $reviews = $this->service
-            ->whereHas('bookings', function ($query) use ($booking_id) {
-                $query->where('booking_id', $booking_id);
+        // Get all services that have reviews for this booking
+        $services = $this->service
+            ->whereHas('reviews', function ($query) use ($booking_id, $customer_id) {
+                $query->where('booking_id', $booking_id)
+                    ->where('customer_id', $customer_id);
             })
-            ->with(['reviews' => function ($query) use ($customer_id, $booking_id) {
-                $query->where('customer_id', $customer_id)
-                    ->whereHas('booking', function ($query) use ($booking_id) {
-                        $query->where('id', $booking_id);
-                    })
+            ->with(['reviews' => function ($query) use ($booking_id, $customer_id) {
+                $query->where('booking_id', $booking_id)
+                    ->where('customer_id', $customer_id)
                     ->with('reviewReply');
             }])
             ->withoutGlobalScope('zone_wise_data')
-            ->orderBy('created_at', 'desc')
             ->get();
 
+        // Transform the response to match desired structure
+        $transformedServices = $services->map(function ($service) {
+            return [
+                'id' => $service->id,
+                'name' => $service->name,
+                'short_description' => $service->short_description,
+                'description' => $service->description,
+                'cover_image' => $service->cover_image,
+                'thumbnail' => $service->thumbnail,
+                'service_img' => $service->service_img ?? '',
+                'category_id' => $service->category_id,
+                'sub_category_id' => $service->sub_category_id,
+                'tax' => $service->tax,
+                'order_count' => $service->order_count,
+                'is_active' => $service->is_active,
+                'rating_count' => $service->rating_count,
+                'avg_rating' => $service->avg_rating,
+                'min_bidding_price' => $service->min_bidding_price ?? '0.000',
+                'deleted_at' => $service->deleted_at,
+                'created_at' => $service->created_at,
+                'updated_at' => $service->updated_at,
+                'thumbnail_full_path' => $service->thumbnail_full_path,
+                'cover_image_full_path' => $service->cover_image_full_path,
+                'service_discount' => $service->service_discount ?? [],
+                'campaign_discount' => $service->campaign_discount ?? [],
+                'review' => $service->reviews->map(function ($review) {
+                    return [
+                        'id' => $review->readable_id,
+                        'booking_id' => $review->booking_id,
+                        'service_id' => $review->service_id,
+                        'review_rating' => $review->review_rating,
+                        'review_comment' => $review->review_comment,
+                        'review_reply' => $review->reviewReply ? [
+                            'id' => $review->reviewReply->id,
+                            'review_id' => $review->reviewReply->review_id,
+                            'reply' => $review->reviewReply->reply,
+                            'updated_at' => $review->reviewReply->updated_at,
+                        ] : null,
+                        'created_at' => $review->created_at,
+                        'updated_at' => $review->updated_at,
+                    ];
+                }),
+            ];
+        });
 
-        return response()->json(response_formatter(DEFAULT_STORE_200, $reviews), 200);
+        return response()->json(response_formatter(DEFAULT_STORE_200, $transformedServices), 200);
     }
+
+    // public function index(Request $request): JsonResponse
+    // {
+    //     $validator = Validator::make($request->all(), [
+    //         'booking_id' => 'required|uuid',
+    //     ]);
+
+
+    //     if ($validator->fails()) {
+    //         return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
+    //         }
+
+    //         $booking_id = $request->booking_id;
+    //         $customer_id = $request->user()->id;
+    //         dd($booking_id, $customer_id);
+
+    //     $reviews = $this->service
+    //         ->whereHas('bookings', function ($query) use ($booking_id) {
+    //             $query->where('booking_id', $booking_id);
+    //         })
+    //         ->with(['reviews' => function ($query) use ($customer_id, $booking_id) {
+    //             $query->where('customer_id', $customer_id)
+    //                 ->whereHas('booking', function ($query) use ($booking_id) {
+    //                     $query->where('id', $booking_id);
+    //                 })
+    //                 ->with('reviewReply');
+    //         }])
+    //         ->withoutGlobalScope('zone_wise_data')
+    //         ->orderBy('created_at', 'desc')
+    //         ->get();
+
+
+    //     return response()->json(response_formatter(DEFAULT_STORE_200, $reviews), 200);
+    // }
 
     /**
      * Store a newly created resource in storage.

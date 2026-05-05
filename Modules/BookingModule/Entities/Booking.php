@@ -416,10 +416,36 @@ class Booking extends Model
                         ];
                     }
 
-                    if ($model?->customer) {
+                    // Only process refund if not skipped (for parent booking when all children cancelled)
+                    if ($model?->customer && !$model->skip_refund) {
                         refundTransactionForCanceledBooking($model);
                     }
-                } elseif ($model->booking_status == 'refund_request') {
+                }
+                // } elseif ($model->booking_status == 'canceled') {
+                //     if ($permission) {
+                //         $notifications[] = [
+                //             'key' => 'booking_cancel',
+                //             'settings_type' => 'customer_notification'
+                //         ];
+                //     }
+                //     if ($providerPermission && !$model->getAttribute('skipProviderNotification')) {
+                //         $notifications[] = [
+                //             'key' => 'booking_cancel',
+                //             'settings_type' => 'provider_notification'
+                //         ];
+                //     }
+                //     if ($servicemanPermission) {
+                //         $notifications[] = [
+                //             'key' => 'booking_cancel',
+                //             'settings_type' => 'serviceman_notification'
+                //         ];
+                //     }
+
+                //     if ($model?->customer) {
+                //         refundTransactionForCanceledBooking($model);
+                //     }
+                // }
+                elseif ($model->booking_status == 'refund_request') {
                     if ($permission) {
                         $notifications[] = [
                             [
