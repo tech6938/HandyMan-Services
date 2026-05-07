@@ -195,15 +195,24 @@ class ProviderController extends Controller
         $limitStatus = provider_warning_amount_calculate($provider?->owner?->account->account_payable, $provider?->owner?->account->account_receivable);
         $provider['cash_limit_status'] = $limitStatus == false ? 'available' : $limitStatus;
 
+        // Get subscribed services for this provider
+        $subscribedServiceIds = $this->subscribed_service
+            ->ofStatus(1)
+            ->where('provider_id', $provider->id)
+            ->pluck('service_id')
+            ->toArray();
+
         $subscribedSubCategoryIds = $this->subscribed_service
             ->ofStatus(1)
             ->where('provider_id', $provider->id)
             ->pluck('sub_category_id')
             ->toArray();
 
+        // Get subcategories with ONLY subscribed services
         $subCategories = $this->category->withoutGlobalScopes()
-            ->with(['services' => function ($query) {
+            ->with(['services' => function ($query) use ($subscribedServiceIds) {
                 $query->ofStatus(1)
+                    ->whereIn('id', $subscribedServiceIds)
                     ->where(function ($query) {
                         $query->whereDoesntHave('service_discount')
                             ->orWhereHas('service_discount');
@@ -214,9 +223,6 @@ class ProviderController extends Controller
                     })
                     ->with(['variations', 'service_discount', 'category.category_discount']);
             }])
-            ->whereHas('services', function ($query) {
-                $query->ofStatus(1);
-            })
             ->whereIn('id', $subscribedSubCategoryIds)
             ->get();
 
