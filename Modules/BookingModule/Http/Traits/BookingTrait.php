@@ -1999,64 +1999,100 @@ trait BookingTrait
      */
     private function update_admin_commission($booking, float $bookingAmount, $providerId): void
     {
-        $commissionDetails = $this->calculateCommissionDetails($booking);
+        $this->syncBookingCommissionRows($booking);
+    }
 
-        $adminCommission = $commissionDetails['adminCommission'];
-        $adminCommissionWithoutCost = $commissionDetails['adminCommissionWithoutCost'];
+    private function reset_booking_commission($booking): void
+    {
+        $bookingDetailsAmounts = $this->getBookingDetailsAmounts($booking);
 
-        $bookingAmountWithoutCommission = $booking['total_booking_amount'] - $adminCommissionWithoutCost;
+        foreach ($bookingDetailsAmounts as $bookingDetailsAmount) {
+            $bookingDetailsAmount->admin_commission = 0;
+            $bookingDetailsAmount->provider_earning = 0;
+            $bookingDetailsAmount->save();
+        }
+    }
 
+    private function getBookingDetailsAmounts($booking)
+    {
         if (isset($booking->booking_id)) {
-            $bookingAmountDetailAmount = BookingDetailsAmount::where('booking_repeat_id', $booking->id)->first();
-        } else {
-            $bookingAmountDetailAmount = BookingDetailsAmount::where('booking_id', $booking->id)->first();
+            return BookingDetailsAmount::where('booking_repeat_id', $booking->id)->get();
         }
 
-        $bookingAmountDetailAmount->admin_commission = $adminCommission;
-        $bookingAmountDetailAmount->provider_earning = $bookingAmountWithoutCommission;
-        $bookingAmountDetailAmount->save();
+        return BookingDetailsAmount::where('booking_id', $booking->id)->get();
+    }
+
+    private function resolveBookingCommissionPercentage($booking): float
+    {
+        $provider = Provider::find($booking['provider_id']);
+
+        if (!$provider) {
+            return 0;
+        }
+
+        return (float) ($provider->commission_status == 1
+            ? $provider->commission_percentage
+            : (business_config('default_commission', 'business_information'))->live_values);
+    }
+
+    private function syncBookingCommissionRows($booking): array
+    {
+        $bookingDetailsAmounts = $this->getBookingDetailsAmounts($booking);
+        $isSubscriptionBooking = SubscriptionBookingType::where('booking_id', isset($booking->booking_id) ? $booking->booking_id : $booking->id)
+            ->where('type', 'subscription')
+            ->exists();
+
+        $commissionPercentage = $isSubscriptionBooking ? 0 : $this->resolveBookingCommissionPercentage($booking);
+
+        $adminCommission = 0;
+        $promotionalCostByAdmin = 0;
+        $providerEarning = 0;
+
+        foreach ($bookingDetailsAmounts as $bookingDetailsAmount) {
+            $servicePrice = (float) $bookingDetailsAmount->service_unit_cost * (int) $bookingDetailsAmount->service_quantity;
+
+            $adminPromotionShare = (float) $bookingDetailsAmount->discount_by_admin
+                + (float) $bookingDetailsAmount->coupon_discount_by_admin
+                + (float) $bookingDetailsAmount->campaign_discount_by_admin;
+
+            $providerPromotionShare = (float) $bookingDetailsAmount->discount_by_provider
+                + (float) $bookingDetailsAmount->coupon_discount_by_provider
+                + (float) $bookingDetailsAmount->campaign_discount_by_provider;
+
+            $lineTotalCost = $servicePrice
+                + (float) $bookingDetailsAmount->service_tax
+                - $adminPromotionShare
+                - $providerPromotionShare;
+
+            $lineCommissionBase = max(0, $servicePrice - $providerPromotionShare);
+            $lineAdminCommission = $isSubscriptionBooking
+                ? 0
+                : round(($lineCommissionBase * $commissionPercentage) / 100, 2);
+
+            $lineProviderEarning = $isSubscriptionBooking
+                ? round($lineTotalCost, 2)
+                : round($lineTotalCost - $lineAdminCommission + $adminPromotionShare, 2);
+
+            $bookingDetailsAmount->admin_commission = $lineAdminCommission;
+            $bookingDetailsAmount->provider_earning = max(0, $lineProviderEarning);
+            $bookingDetailsAmount->save();
+
+            $adminCommission += $lineAdminCommission;
+            $promotionalCostByAdmin += $adminPromotionShare;
+            $providerEarning += $bookingDetailsAmount->provider_earning;
+        }
+
+        return [
+            'adminCommission' => round($adminCommission, 2),
+            'adminCommissionWithoutCost' => round($adminCommission - $promotionalCostByAdmin, 2),
+            'providerEarning' => round($providerEarning, 2),
+        ];
     }
 
 
     public function calculateCommissionDetails($booking): array
     {
-        if (isset($booking->booking_id)) {
-            $bookingId = $booking->booking_id;
-            $bookingDetailsAmounts = BookingDetailsAmount::where('booking_repeat_id', $booking->id)->get();
-        } else {
-            $bookingId = $booking->id;
-            $bookingDetailsAmounts = BookingDetailsAmount::where('booking_id', $booking->id)->get();
-        }
-
-        $bookingType = SubscriptionBookingType::where('booking_id', $bookingId)->where('type', 'subscription')->first();
-        if ($bookingType) {
-            return [
-                'adminCommission' => 0,
-                'adminCommissionWithoutCost' => 0,
-            ];
-        }
-
-        $serviceCost = $booking['total_booking_amount'] - $booking['total_tax_amount'] + $booking['total_discount_amount'] + $booking['total_campaign_discount_amount'] + $booking['total_coupon_discount_amount'] - $booking['extra_fee'];
-
-        $promotionalCostByAdmin = 0;
-        $promotionalCostByProvider = 0;
-        foreach ($bookingDetailsAmounts as $bookingDetailsAmount) {
-            $promotionalCostByAdmin += $bookingDetailsAmount['discount_by_admin'] + $bookingDetailsAmount['coupon_discount_by_admin'] + $bookingDetailsAmount['campaign_discount_by_admin'];
-            $promotionalCostByProvider += $bookingDetailsAmount['discount_by_provider'] + $bookingDetailsAmount['coupon_discount_by_provider'] + $bookingDetailsAmount['campaign_discount_by_provider'];
-        }
-
-        $providerReceivableTotalAmount = $serviceCost - $promotionalCostByProvider;
-
-        $provider = Provider::find($booking['provider_id']);
-        $commissionPercentage = $provider->commission_status == 1 ? $provider->commission_percentage : (business_config('default_commission', 'business_information'))->live_values;
-        $adminCommission = ($providerReceivableTotalAmount * $commissionPercentage) / 100;
-
-        $adminCommissionWithoutCost = $adminCommission - $promotionalCostByAdmin;
-
-        return [
-            'adminCommission' => $adminCommission,
-            'adminCommissionWithoutCost' => $adminCommissionWithoutCost,
-        ];
+        return $this->syncBookingCommissionRows($booking);
     }
 
 

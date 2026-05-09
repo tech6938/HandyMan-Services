@@ -399,6 +399,8 @@ class Booking extends Model
                         }
                     }
                 } elseif ($model->booking_status == 'canceled') {
+                    $model->reset_booking_commission($model);
+
                     if ($permission) {
                         $notifications[] = [
                             'key' => 'booking_cancel',

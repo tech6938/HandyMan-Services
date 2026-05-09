@@ -250,6 +250,8 @@ class BookingRepeat extends Model
                         }
                     }
                 } elseif ($model->booking_status == 'canceled' && $model->skipNotification) {
+                    $model->reset_booking_commission($model);
+
                     if ($permission) {
                         $notifications[] = [
                             'key' => 'booking_cancel',
