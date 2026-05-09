@@ -408,6 +408,14 @@ $logo = getBusinessSettingsImageFullPath(key: 'business_logo', settingType: 'bus
                         @endcan
                         @can('service_view')
                             <li>
+                                <a href="{{route('admin.service.commission.index')}}"
+                                   class="{{request()->is('admin/service/commission/*')?'active-menu':''}}">
+                                    {{translate('service_commission')}}
+                                </a>
+                            </li>
+                        @endcan
+                        @can('service_view')
+                            <li>
                                 <a href="{{route('admin.service.request.list')}}"
                                    class="{{request()->is('admin/service/request/list*')?'active-menu':''}}">
                                     <span class="link-title">{{translate('New Service Requests')}}</span>

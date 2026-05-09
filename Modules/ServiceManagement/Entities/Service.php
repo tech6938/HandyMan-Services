@@ -54,6 +54,11 @@ class Service extends Model
         return $this->hasMany(BookingDetail::class, 'service_id', 'id');
     }
 
+    public function commissions(): HasMany
+    {
+        return $this->hasMany(ServiceCommission::class, 'service_id', 'id');
+    }
+
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class, 'category_id', 'id')->withoutGlobalScopes();

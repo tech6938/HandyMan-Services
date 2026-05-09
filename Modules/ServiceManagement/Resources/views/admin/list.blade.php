@@ -41,6 +41,11 @@
                                 {{ translate('inactive') }}
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link {{ request()->routeIs('admin.service.commission.*') ? 'active' : '' }}" href="{{ route('admin.service.commission.index') }}">
+                                {{ translate('service_commission') }}
+                            </a>
+                        </li>
                     </ul>
 
                     <div class="d-flex gap-2 fw-medium">
@@ -104,7 +109,7 @@
                                                     {{--{{$service->category->name}}--}}
                                                 </td>
                                                 <td>
-                                                    {{-- @dd($service->category->name) 
+                                                    {{-- @dd($service->category->name)
                                                     @if ($service->category->name)
                                                     {{ implode(', ', $service->category->zonesBasicInfo->pluck('name')->toArray()) ?? translate('not_found') }}
                                                     @endif --}}

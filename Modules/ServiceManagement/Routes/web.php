@@ -22,7 +22,14 @@ Route::group(['prefix' => 'admin', 'as' => 'admin.', 'namespace' => 'Web\Admin',
         Route::post('request/update/{id}', [ServiceRequestController::class, 'updateStatus'])->name('request.update');
 
         Route::any('review-status-update/{id}', 'ServiceController@reviewStatusUpdate')->name('review-status-update');
-
+        Route::group(['prefix' => 'commission', 'as' => 'commission.'], function () {
+            Route::any('list', 'ServiceCommissionController@index')->name('index');
+            Route::any('create', 'ServiceCommissionController@create')->name('create');
+            Route::post('store', 'ServiceCommissionController@store')->name('store');
+            Route::get('edit/{id}', 'ServiceCommissionController@edit')->name('edit');
+            Route::put('update/{id}', 'ServiceCommissionController@update')->name('update');
+            Route::delete('delete/{id}', 'ServiceCommissionController@destroy')->name('delete');
+        });
         //ajax routes
         Route::any('ajax-add-variant', 'ServiceController@ajaxAddVariant')->name('ajax-add-variant')->withoutMiddleware('csrf');
         Route::any('ajax-remove-variant/{variant_key}', 'ServiceController@ajaxRemoveVariant')->name('ajax-remove-variant')->withoutMiddleware('csrf');
