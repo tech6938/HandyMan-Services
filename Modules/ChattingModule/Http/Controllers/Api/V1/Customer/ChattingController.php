@@ -157,7 +157,7 @@ class ChattingController extends Controller
             'limit' => 'required|numeric|min:1|max:200',
             'offset' => 'required|numeric|min:1|max:100000',
             'reference_id' => 'required',
-            'reference_type' => 'required|in:booking_id',
+            'reference_type' => 'required|string',
         ]);
 
         if ($validator->fails()) {
@@ -183,7 +183,7 @@ class ChattingController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'reference_id' => '',
-            'reference_type' => 'in:booking_id',
+            'reference_type' => 'nullable|string',
             'to_user' => 'required|uuid'
         ]);
 
@@ -191,37 +191,20 @@ class ChattingController extends Controller
             return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
         }
 
-        $channelIds = $this->channelUser->where(['user_id' => $request->user()->id])->pluck('channel_id')->toArray();
-        $findChannel = $this->channelList->whereIn('id', $channelIds)->whereHas('channelUsers', function ($query) use ($request) {
-            $query->where(['user_id' => $request['to_user']]);
-        })->latest()->first();
-
-        if (!isset($findChannel)) {
-            $channel = $this->channelList;
-            $channel->reference_id = $request['reference_id'] ?? null;
-            $channel->reference_type = $request['reference_type'] ?? null;
-            $channel->save();
-
-            $this->channelUser->insert([
-                [
-                    'id' => Uuid::uuid4(),
-                    'channel_id' => $channel->id,
-                    'user_id' => $request->user()->id,
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ],
-                [
-                    'id' => Uuid::uuid4(),
-                    'channel_id' => $channel->id,
-                    'user_id' => $request['to_user'],
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]
-            ]);
-            return response()->json(response_formatter(DEFAULT_STORE_200, $channel), 200);
+        $toUser = $this->resolveChatReceiverUserId($request['to_user']);
+        if (!$toUser) {
+            return response()->json(response_formatter(DEFAULT_404, ['message' => 'Receiver not found']), 404);
         }
 
-        return response()->json(response_formatter(DEFAULT_200, $findChannel), 200);
+        $channel = $this->createNewChannel(
+            fromUser: $request->user()->id,
+            toUser: $toUser,
+            referenceId: $request['reference_id'] ?? null,
+            referenceType: $request['reference_type'] ?? null,
+            created: $created,
+        );
+
+        return response()->json(response_formatter($created ? DEFAULT_STORE_200 : DEFAULT_200, $channel), 200);
     }
 
     /**
@@ -229,91 +212,6 @@ class ChattingController extends Controller
      * @param Request $request
      * @return JsonResponse
      */
-    // public function sendMessage(Request $request): JsonResponse
-    // {
-    //     $validator = Validator::make($request->all(), [
-    //         'message'    => 'nullable|string',
-    //         'channel_id' => 'required|uuid',
-    //         'files'      => $request->filled('message') ? 'nullable|array' : 'required|array',
-    //         'files.*'    => 'max:10240|mimes:' . implode(',', array_column(FILE_TYPE, 'key')),
-    //     ], [
-    //         'files.required' => 'The files field is required when message is not provided.',
-    //     ]);
-
-    //     if ($validator->fails()) {
-    //         return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
-    //     }
-
-    //     $savedConversation = null;
-
-    //     DB::transaction(function () use ($request, &$savedConversation) {
-
-    //         $this->channelList->where('id', $request['channel_id'])->update([
-    //             'updated_at' => now()
-    //         ]);
-
-    //         $this->channelUser->where('channel_id', $request['channel_id'])
-    //             ->where('user_id', '!=', $request->user()->id)
-    //             ->update(['is_read' => 0]);
-
-    //         // Save conversation row
-    //         $channelConversation = $this->channelConversation;
-    //         $channelConversation->channel_id = $request->channel_id;
-    //         $channelConversation->message    = $request->input('message');
-    //         $channelConversation->user_id    = $request->user()->id;
-    //         $channelConversation->save();
-
-    //         // Upload files to public/conversation
-    //         if ($request->hasFile('files')) {
-    //             $dir = public_path('conversation');
-    //             if (!is_dir($dir)) {
-    //                 mkdir($dir, 0755, true);
-    //             }
-
-    //             foreach ($request->file('files') as $file) {
-    //                 $extension    = $file->getClientOriginalExtension();
-    //                 $originalName = $file->getClientOriginalName();
-
-    //                 $storedName = time() . '-' . uniqid() . '.' . $extension;
-    //                 $file->move($dir, $storedName);
-
-    //                 // ✅ IMPORTANT: stored_file_name me sirf filename store karo
-    //                 $this->conversationFile->create([
-    //                     'conversation_id'    => $channelConversation->id,
-    //                     'original_file_name' => $originalName,
-    //                     'stored_file_name'   => $storedName, // ✅ FIXED (no "conversation/")
-    //                     'file_type'          => $extension,
-    //                 ]);
-    //             }
-    //         }
-
-    //         // Load conversation with files + user
-    //         $savedConversation = $this->channelConversation
-    //             ->where('id', $channelConversation->id)
-    //             ->with(['user', 'conversationFiles'])
-    //             ->first();
-
-    //         // ✅ Add full URLs for frontend
-    //         if ($savedConversation) {
-    //             $savedConversation->files = $savedConversation->conversationFiles->map(function ($f) {
-    //                 $path = 'conversation/' . ltrim($f->stored_file_name, '/');
-
-    //                 return [
-    //                     'id'                 => $f->id,
-    //                     'original_file_name' => $f->original_file_name,
-    //                     'stored_file_name'   => $f->stored_file_name, // filename only
-    //                     'file_type'          => $f->file_type,
-    //                     'url'                => asset($path), // ✅ full URL
-    //                 ];
-    //             })->values();
-    //         }
-    //     });
-
-    //     return response()->json(response_formatter(DEFAULT_STORE_200, [
-    //         'message' => 'Message sent successfully',
-    //         'data'    => $savedConversation,
-    //     ]), 200);
-    // }
 
     public function sendMessage(Request $request): JsonResponse
     {

@@ -11,10 +11,13 @@ use Modules\ChattingModule\Entities\ChannelConversation;
 use Modules\ChattingModule\Entities\ChannelList;
 use Modules\ChattingModule\Entities\ChannelUser;
 use Modules\ChattingModule\Entities\ConversationFile;
+use Modules\ChattingModule\Traits\ChattingTrait;
 use Ramsey\Uuid\Nonstandard\Uuid;
 
 class GlobalChattingController extends Controller
 {
+    use ChattingTrait;
+
     protected ChannelList $channelList;
     protected ChannelUser $channelUser;
     protected ChannelConversation $channelConversation;
@@ -69,7 +72,7 @@ class GlobalChattingController extends Controller
             'limit' => 'required|numeric|min:1|max:200',
             'offset' => 'required|numeric|min:1|max:100000',
             'reference_id' => 'required',
-            'reference_type' => 'required|in:booking_id',
+            'reference_type' => 'required|string',
         ]);
 
         if ($validator->fails()) {
@@ -99,7 +102,7 @@ class GlobalChattingController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'reference_id' => '',
-            'reference_type' => 'in:booking_id',
+            'reference_type' => 'nullable|string',
             'to_user' => 'required|uuid'
         ]);
 
@@ -107,10 +110,26 @@ class GlobalChattingController extends Controller
             return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
         }
 
+        $toUser = $this->resolveChatReceiverUserId($request['to_user']);
+        if (!$toUser) {
+            return response()->json(response_formatter(DEFAULT_404, ['message' => 'Receiver not found']), 404);
+        }
+
         $channelIds = $this->channelUser->where(['user_id' => $request->user()->id])->pluck('channel_id')->toArray();
-        $findChannel = $this->channelList->whereIn('id', $channelIds)->whereHas('channelUsers', function ($query) use ($request) {
-            $query->where(['user_id' => $request['to_user']]);
-        })->latest()->first();
+        $findChannel = $this->channelList
+            ->whereIn('id', $channelIds)
+            ->whereHas('channelUsers', function ($query) use ($toUser) {
+                $query->where(['user_id' => $toUser]);
+            });
+
+        if (!is_null($request['reference_id'])) {
+            $findChannel = $findChannel->where('reference_id', $request['reference_id']);
+        }
+        if (!is_null($request['reference_type'])) {
+            $findChannel = $findChannel->where('reference_type', $request['reference_type']);
+        }
+
+        $findChannel = $findChannel->latest()->first();
 
         if (!isset($findChannel)) {
             $channel = $this->channelList;
@@ -129,7 +148,7 @@ class GlobalChattingController extends Controller
                 [
                     'id' => Uuid::uuid4(),
                     'channel_id' => $channel->id,
-                    'user_id' => $request['to_user'],
+                    'user_id' => $toUser,
                     'created_at' => now(),
                     'updated_at' => now()
                 ]

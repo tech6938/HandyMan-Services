@@ -607,7 +607,12 @@ class BookingController extends Controller
 
     public function show(Request $request, string $id): JsonResponse
     {
-        $provider_id = $request->user()->provider->id;
+        $provider = $request->user()?->provider;
+        if (!$provider) {
+            return response()->json(response_formatter(DEFAULT_403, ['message' => 'Provider profile not found']), 403);
+        }
+
+        $provider_id = $provider->id;
 
         // Fetch child booking — must belong to this provider or be unassigned pending
         $booking = $this->booking->with([

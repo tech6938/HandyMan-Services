@@ -296,10 +296,13 @@ class BookingController extends Controller
             $booking['services_detail'] = $filteredChildren->map(function ($child) {
                 return [
                     'child_booking_id' => $child->id,
+                    'chat_reference_id' => $child->id,
+                    'chat_reference_type' => 'booking_id',
                     'booking_status'   => $child->booking_status,
                     'booking_otp'      => $child->booking_otp,
                     'provider'         => $child->provider ? [
                         'id'    => $child->provider->id,
+                        'user_id' => $child->provider->user_id,
                         'name'  => $child->provider->owner->first_name . ' ' . $child->provider->owner->last_name,
                         'phone' => $child->provider->owner->phone,
                         'image' => $child->provider->owner->image_full_path ?? null,
@@ -391,6 +394,8 @@ class BookingController extends Controller
             $booking['services_detail'] = $booking->childBookings->map(function ($child) use ($booking) {
                 return [
                     'child_booking_id' => $child->id,
+                    'chat_reference_id' => $child->id,
+                    'chat_reference_type' => 'booking_id',
                     'booking_status'   => $child->booking_status,
                     'booking_otp'      => $child->booking_otp,
                     'service_schedule' => $child->service_schedule,
@@ -398,6 +403,7 @@ class BookingController extends Controller
                     // 'evidence_photos_full_path' => $child->evidence_photos_full_path ?? [],
                     'provider'         => $child->provider ? [
                         'id'    => $child->provider->id,
+                        'user_id' => $child->provider->user_id,
                         'company_name'  => $child->provider->contact_person_name,
                         'company_phone' => $child->provider->contact_person_phone,
                         'logo_full_path' => $child->provider->logo_full_path ?? null,
@@ -482,6 +488,7 @@ class BookingController extends Controller
 
         if (isset($booking->provider)) {
             $booking->provider->chatEligibility = chatEligibility($booking->provider_id);
+            $booking->provider->chat_user_id = $booking->provider->user_id;
         }
 
         if ($booking->repeat->isNotEmpty()) {
@@ -555,6 +562,7 @@ class BookingController extends Controller
         if (isset($booking)) {
             if (isset($booking->provider)) {
                 $booking->provider->chatEligibility = chatEligibility($booking->provider_id);
+                $booking->provider->chat_user_id = $booking->provider->user_id;
             }
             return response()->json(response_formatter(DEFAULT_200, $booking), 200);
         }

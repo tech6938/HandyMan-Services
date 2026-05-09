@@ -2,18 +2,55 @@
 
 namespace Modules\ChattingModule\Traits;
 
+use Modules\ProviderManagement\Entities\Provider;
+use Modules\UserManagement\Entities\Serviceman;
+use Modules\UserManagement\Entities\User;
 use Ramsey\Uuid\Nonstandard\Uuid;
 
 trait ChattingTrait
 {
-    public function createNewChannel($fromUser, $toUser, $referenceId = null, $referenceType = null)
+    protected function resolveChatReceiverUserId(?string $receiverId): ?string
     {
+        if (!$receiverId) {
+            return null;
+        }
+
+        if (User::query()->whereKey($receiverId)->exists()) {
+            return $receiverId;
+        }
+
+        $providerOwnerId = Provider::query()
+            ->whereKey($receiverId)
+            ->value('user_id');
+
+        if ($providerOwnerId) {
+            return $providerOwnerId;
+        }
+
+        return Serviceman::query()
+            ->whereKey($receiverId)
+            ->value('user_id');
+    }
+
+    public function createNewChannel($fromUser, $toUser, $referenceId = null, $referenceType = null, &$created = null)
+    {
+        $toUser = $this->resolveChatReceiverUserId($toUser);
+
         $channelIds = $this->channelUser->where(['user_id' => $fromUser])->pluck('channel_id')->toArray();
         $findChannel = $this->channelList
             ->whereIn('id', $channelIds)
             ->whereHas('channelUsers', function ($query) use ($toUser) {
                 $query->where(['user_id' => $toUser]);
-            })->latest()->first();
+            });
+
+        if (!is_null($referenceId)) {
+            $findChannel = $findChannel->where('reference_id', $referenceId);
+        }
+        if (!is_null($referenceType)) {
+            $findChannel = $findChannel->where('reference_type', $referenceType);
+        }
+
+        $findChannel = $findChannel->latest()->first();
 
         if (!isset($findChannel)) {
             $channel = $this->channelList;
@@ -37,9 +74,11 @@ trait ChattingTrait
                     'updated_at' => now()
                 ]
             ]);
+            $created = true;
             return $channel;
         }
 
+        $created = false;
         return $findChannel;
     }
 
