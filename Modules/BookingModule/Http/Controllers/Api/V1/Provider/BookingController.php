@@ -69,7 +69,6 @@ class BookingController extends Controller
      * @param Request $request
      * @return JsonResponse
      */
-
     // public function index(Request $request): JsonResponse
     // {
     //     $validator = Validator::make($request->all(), [
@@ -97,7 +96,6 @@ class BookingController extends Controller
     //         ->filter()
     //         ->toArray();
 
-    //     // No subscribed services = return empty immediately
     //     if (empty($subscribedServiceIds)) {
     //         return response()->json(response_formatter(DEFAULT_200, [
     //             'bookings_count' => array_fill_keys(array_column(BOOKING_STATUSES, 'key'), 0),
@@ -105,19 +103,18 @@ class BookingController extends Controller
     //         ]), 200);
     //     }
 
-    //     $hasSubscribedService = function ($q) use ($subscribedServiceIds) {
-    //         $q->whereIn('service_id', $subscribedServiceIds);
-    //     };
-
-    //     // ── Status counts ───────────────────────────────────────────────────────
+    //     // ── Status counts ────────────────────────────────────────────────────────
+    //     // Count CHILD bookings (parent_booking_id NOT NULL) assigned to this provider
     //     $status_wise_bookings_count = $this->booking
+    //         ->whereNotNull('parent_booking_id')
     //         ->where('provider_id', $providerId)
-    //         ->whereHas('detail', $hasSubscribedService)
-    //         ->whereDoesntHave('ignores', function ($query) use ($providerId) {
-    //             $query->where('provider_id', $providerId);
+    //         ->whereDoesntHave('ignores', function ($q) use ($providerId) {
+    //             $q->where('provider_id', $providerId);
     //         })
     //         ->when($request['service_type'] != 'all', function ($query) use ($request) {
-    //             return $query->ofRepeatBookingStatus($request['service_type'] === 'repeat' ? 1 : ($request['service_type'] === 'regular' ? 0 : null));
+    //             return $query->ofRepeatBookingStatus(
+    //                 $request['service_type'] === 'repeat' ? 1 : ($request['service_type'] === 'regular' ? 0 : null)
+    //             );
     //         })
     //         ->select('booking_status', DB::raw('count(*) as total'))
     //         ->groupBy('booking_status')
@@ -128,71 +125,66 @@ class BookingController extends Controller
     //         return [$item['key'] => $total ? $total->total : 0];
     //     })->toArray();
 
+    //     // Pending count: child bookings with no provider yet, subscribed service, in provider zone
     //     $bookings_count['pending'] = $this->booking
     //         ->providerPendingBookings($request->user()->provider, $maxBookingAmount)
-    //         ->whereDoesntHave('ignores', function ($query) use ($providerId) {
-    //             $query->where('provider_id', $providerId);
+    //         ->whereDoesntHave('ignores', function ($q) use ($providerId) {
+    //             $q->where('provider_id', $providerId);
     //         })
     //         ->when($request['service_type'] != 'all', function ($query) use ($request) {
-    //             return $query->ofRepeatBookingStatus($request['service_type'] === 'repeat' ? 1 : ($request['service_type'] === 'regular' ? 0 : null));
+    //             return $query->ofRepeatBookingStatus(
+    //                 $request['service_type'] === 'repeat' ? 1 : ($request['service_type'] === 'regular' ? 0 : null)
+    //             );
     //         })
     //         ->count();
 
+    //     // Accepted count: child bookings accepted by this provider
     //     $bookings_count['accepted'] = $this->booking
-    //         ->providerAcceptedBookings($request->user()->provider->id, $maxBookingAmount)
-    //         ->whereHas('detail', $hasSubscribedService)
-    //         ->whereDoesntHave('ignores', function ($query) use ($providerId) {
-    //             $query->where('provider_id', $providerId);
+    //         ->whereNotNull('parent_booking_id')
+    //         ->where('provider_id', $providerId)
+    //         ->where('booking_status', 'accepted')
+    //         ->whereDoesntHave('ignores', function ($q) use ($providerId) {
+    //             $q->where('provider_id', $providerId);
     //         })
     //         ->when($request['service_type'] != 'all', function ($query) use ($request) {
-    //             return $query->ofRepeatBookingStatus($request['service_type'] === 'repeat' ? 1 : ($request['service_type'] === 'regular' ? 0 : null));
+    //             return $query->ofRepeatBookingStatus(
+    //                 $request['service_type'] === 'repeat' ? 1 : ($request['service_type'] === 'regular' ? 0 : null)
+    //             );
     //         })
     //         ->count();
 
-    //     // ── Bookings list ───────────────────────────────────────────────────────
+    //     // ── Bookings list ─────────────────────────────────────────────────────────
+    //     // Always work with CHILD bookings (parent_booking_id NOT NULL)
+    //     // Each child booking = one service = one provider
     //     $bookings = $this->booking
     //         ->with([
     //             'repeat',
     //             'detail',
     //             'customer',
     //             'subCategory:id,name',
+    //             'parentBooking',
     //             'booking_offline_payments' => function ($query) {
     //                 $query->first() ?? [];
     //             },
     //         ])
-    //         ->when(!in_array($request['booking_status'], ['pending', 'all']), function ($query) use ($providerId, $request, $maxBookingAmount, $hasSubscribedService) {
+    //         ->whereNotNull('parent_booking_id')
+    //         ->when(!in_array($request['booking_status'], ['pending', 'all']), function ($query) use ($providerId, $request, $maxBookingAmount) {
     //             $query->ofBookingStatus($request['booking_status'])
-    //                 ->whereHas('detail', $hasSubscribedService)
-    //                 ->where(function ($query) use ($providerId) {
-    //                     $query->where('provider_id', $providerId)
-    //                         ->orWhereHas('repeat', function ($subQuery) use ($providerId) {
-    //                             $subQuery->where('provider_id', $providerId);
-    //                         });
-    //                 })
-    //                 ->whereDoesntHave('ignores', function ($query) use ($providerId) {
-    //                     $query->where('provider_id', $providerId);
-    //                 })
-    //                 ->when($request['booking_status'] == 'accepted', function ($query) use ($providerId, $request, $maxBookingAmount) {
-    //                     $query->providerAcceptedBookings($request->user()->provider->id, $maxBookingAmount)
-    //                         ->whereDoesntHave('ignores', function ($query) use ($providerId) {
-    //                             $query->where('provider_id', $providerId);
-    //                         });
+    //                 ->where('provider_id', $providerId)
+    //                 ->whereDoesntHave('ignores', function ($q) use ($providerId) {
+    //                     $q->where('provider_id', $providerId);
     //                 });
     //         })
-    //         ->when($request['booking_status'] == 'all', function ($query) use ($providerId, $request, $maxBookingAmount, $hasSubscribedService) {
-    //             $query->where(function ($root) use ($providerId, $hasSubscribedService, $request, $maxBookingAmount) {
-    //                 $root->where(function ($q) use ($providerId, $hasSubscribedService) {
-    //                     $q->whereHas('detail', $hasSubscribedService)
-    //                         ->where(function ($q2) use ($providerId) {
-    //                             $q2->where('provider_id', $providerId)
-    //                                 ->orWhereHas('repeat', function ($sq) use ($providerId) {
-    //                                     $sq->where('provider_id', $providerId);
-    //                                 });
-    //                         })
-    //                         ->whereDoesntHave('ignores', function ($q3) use ($providerId) {
-    //                             $q3->where('provider_id', $providerId);
+    //         ->when($request['booking_status'] == 'all', function ($query) use ($providerId, $request, $maxBookingAmount) {
+    //             $query->where(function ($root) use ($providerId, $request, $maxBookingAmount) {
+    //                 // Assigned child bookings
+    //                 $root->where(function ($q) use ($providerId) {
+    //                     $q->where('provider_id', $providerId)
+    //                         ->whereDoesntHave('ignores', function ($q2) use ($providerId) {
+    //                             $q2->where('provider_id', $providerId);
     //                         });
     //                 })
+    //                     // Pending unassigned child bookings matching subscription
     //                     ->orWhere(function ($q) use ($request, $maxBookingAmount, $providerId) {
     //                         $q->providerPendingBookings($request->user()->provider, $maxBookingAmount)
     //                             ->whereDoesntHave('ignores', function ($q2) use ($providerId) {
@@ -203,12 +195,14 @@ class BookingController extends Controller
     //         })
     //         ->when($request['booking_status'] == 'pending', function ($query) use ($providerId, $request, $maxBookingAmount) {
     //             $query->providerPendingBookings($request->user()->provider, $maxBookingAmount)
-    //                 ->whereDoesntHave('ignores', function ($query) use ($providerId) {
-    //                     $query->where('provider_id', $providerId);
+    //                 ->whereDoesntHave('ignores', function ($q) use ($providerId) {
+    //                     $q->where('provider_id', $providerId);
     //                 });
     //         })
     //         ->when($request['service_type'] != 'all', function ($query) use ($request) {
-    //             return $query->ofRepeatBookingStatus($request['service_type'] === 'repeat' ? 1 : ($request['service_type'] === 'regular' ? 0 : null));
+    //             return $query->ofRepeatBookingStatus(
+    //                 $request['service_type'] === 'repeat' ? 1 : ($request['service_type'] === 'regular' ? 0 : null)
+    //             );
     //         })
     //         ->search(base64_decode($request['string']), ['readable_id'])
     //         ->filterByDateRange($request['from_date'], $request['to_date'])
@@ -218,24 +212,12 @@ class BookingController extends Controller
     //         ->paginate($request['limit'], ['*'], 'offset', $request['offset'])
     //         ->withPath('');
 
-    //     // ── Strip unsubscribed detail lines and recalculate totals ──────────────
+    //     // No detail stripping needed — each child booking already contains
+    //     // only its own service. Just expose the booking_otp from parent.
     //     foreach ($bookings as $booking) {
-    //         $booking->setRelation(
-    //             'detail',
-    //             $booking->detail->filter(
-    //                 fn($d) => in_array($d->service_id, $subscribedServiceIds)
-    //             )->values()
-    //         );
-
-    //         $booking->total_booking_amount           = $booking->detail->sum('total_cost');
-    //         $booking->total_tax_amount               = $booking->detail->sum('tax_amount');
-    //         $booking->total_discount_amount          = $booking->detail->sum('discount_amount');
-    //         $booking->total_campaign_discount_amount = $booking->detail->sum('campaign_discount_amount');
-    //         $booking->total_coupon_discount_amount   = $booking->detail->sum('overall_coupon_discount_amount');
-
     //         if ($booking->repeat->isNotEmpty()) {
     //             $sortedRepeats = $booking->repeat->sortBy(function ($repeat) {
-    //                 $parts = explode('-', $repeat->readable_id);
+    //                 $parts  = explode('-', $repeat->readable_id);
     //                 $suffix = end($parts);
     //                 return $this->readableIdToNumber($suffix);
     //             });
@@ -285,9 +267,8 @@ class BookingController extends Controller
         }
 
         // ── Status counts ────────────────────────────────────────────────────────
-        // Count CHILD bookings (parent_booking_id NOT NULL) assigned to this provider
+        // Count bookings assigned to this provider (root or child)
         $status_wise_bookings_count = $this->booking
-            ->whereNotNull('parent_booking_id')
             ->where('provider_id', $providerId)
             ->whereDoesntHave('ignores', function ($q) use ($providerId) {
                 $q->where('provider_id', $providerId);
@@ -319,9 +300,8 @@ class BookingController extends Controller
             })
             ->count();
 
-        // Accepted count: child bookings accepted by this provider
+        // Accepted count: bookings accepted and assigned to this provider
         $bookings_count['accepted'] = $this->booking
-            ->whereNotNull('parent_booking_id')
             ->where('provider_id', $providerId)
             ->where('booking_status', 'accepted')
             ->whereDoesntHave('ignores', function ($q) use ($providerId) {
@@ -335,8 +315,7 @@ class BookingController extends Controller
             ->count();
 
         // ── Bookings list ─────────────────────────────────────────────────────────
-        // Always work with CHILD bookings (parent_booking_id NOT NULL)
-        // Each child booking = one service = one provider
+        // Show assigned bookings for the provider, whether root or child
         $bookings = $this->booking
             ->with([
                 'repeat',
@@ -348,7 +327,6 @@ class BookingController extends Controller
                     $query->first() ?? [];
                 },
             ])
-            ->whereNotNull('parent_booking_id')
             ->when(!in_array($request['booking_status'], ['pending', 'all']), function ($query) use ($providerId, $request, $maxBookingAmount) {
                 $query->ofBookingStatus($request['booking_status'])
                     ->where('provider_id', $providerId)
@@ -358,7 +336,7 @@ class BookingController extends Controller
             })
             ->when($request['booking_status'] == 'all', function ($query) use ($providerId, $request, $maxBookingAmount) {
                 $query->where(function ($root) use ($providerId, $request, $maxBookingAmount) {
-                    // Assigned child bookings
+                    // Assigned bookings (root or child)
                     $root->where(function ($q) use ($providerId) {
                         $q->where('provider_id', $providerId)
                             ->whereDoesntHave('ignores', function ($q2) use ($providerId) {
@@ -464,146 +442,6 @@ class BookingController extends Controller
      * @param string $id
      * @return JsonResponse
      */
-
-    // public function show(Request $request, string $id): JsonResponse
-    // {
-    //     $provider_id = $request->user()->provider->id;
-
-    //     $subscribedServiceIds = SubscribedService::where('provider_id', $provider_id)
-    //         ->where('is_subscribed', 1)
-    //         ->pluck('service_id')
-    //         ->filter()
-    //         ->toArray();
-
-    //     $booking = $this->booking->with([
-    //         'detail.service',
-    //         'schedule_histories.user',
-    //         'status_histories.user',
-    //         'service_address',
-    //         'customer',
-    //         'provider',
-    //         'zone',
-    //         'serviceman.user',
-    //         'booking_partial_payments',
-    //         'booking_offline_payments',
-    //         'repeat.detail.service',
-    //         'repeat.repeatHistories'
-    //     ])->where(function ($query) use ($provider_id) {
-    //         $query->where(function ($query) use ($provider_id) {
-    //             $query->where('provider_id', $provider_id)
-    //                 ->orWhereHas('repeat', function ($subQuery) use ($provider_id) {
-    //                     $subQuery->where('provider_id', $provider_id);
-    //                 });
-    //         })->orWhereNull('provider_id');
-    //     })->where(['id' => $id])->first();
-
-    //     if (isset($booking)) {
-
-    //         // Strip unsubscribed detail lines and recalculate totals
-    //         if (!empty($subscribedServiceIds)) {
-    //             $booking->setRelation(
-    //                 'detail',
-    //                 $booking->detail->filter(
-    //                     fn($d) => in_array($d->service_id, $subscribedServiceIds)
-    //                 )->values()
-    //             );
-
-    //             $booking->total_booking_amount           = $booking->detail->sum('total_cost');
-    //             $booking->total_tax_amount               = $booking->detail->sum('tax_amount');
-    //             $booking->total_discount_amount          = $booking->detail->sum('discount_amount');
-    //             $booking->total_campaign_discount_amount = $booking->detail->sum('campaign_discount_amount');
-    //             $booking->total_coupon_discount_amount   = $booking->detail->sum('overall_coupon_discount_amount');
-    //         }
-
-    //         $offlinePayment = $booking->booking_offline_payments?->first();
-    //         unset($booking->booking_offline_payments);
-
-    //         if ($offlinePayment) {
-    //             $booking->booking_offline_payment_method = $offlinePayment->method_name;
-    //             $booking->booking_offline_payment = collect($offlinePayment->customer_information)->map(function ($value, $key) {
-    //                 return ["key" => $key, "value" => $value];
-    //             })->values()->all();
-    //         }
-
-    //         if ($booking->repeat->isNotEmpty()) {
-    //             $repeatHistoryCollection = $booking->repeat->flatMap(function ($repeat) {
-    //                 return $repeat->repeatHistories->map(function ($history) {
-    //                     $history->log_details = json_decode($history->log_details);
-    //                     return $history;
-    //                 });
-    //             });
-
-    //             $booking['repeatHistory'] = $repeatHistoryCollection->toArray();
-
-    //             $sortedRepeats = $booking->repeat->sortBy(function ($repeat) {
-    //                 $parts = explode('-', $repeat->readable_id);
-    //                 $suffix = end($parts);
-    //                 return $this->readableIdToNumber($suffix);
-    //             });
-
-    //             // Strip unsubscribed detail lines from each repeat and recalculate totals
-    //             $sortedRepeats = $sortedRepeats->map(function ($repeat) use ($subscribedServiceIds) {
-    //                 if (!empty($subscribedServiceIds)) {
-    //                     $repeat->setRelation(
-    //                         'detail',
-    //                         $repeat->detail->filter(
-    //                             fn($d) => in_array($d->service_id, $subscribedServiceIds)
-    //                         )->values()
-    //                     );
-
-    //                     $repeat->total_booking_amount           = $repeat->detail->sum('total_cost');
-    //                     $repeat->total_tax_amount               = $repeat->detail->sum('tax_amount');
-    //                     $repeat->total_discount_amount          = $repeat->detail->sum('discount_amount');
-    //                     $repeat->total_campaign_discount_amount = $repeat->detail->sum('campaign_discount_amount');
-    //                     $repeat->total_coupon_discount_amount   = $repeat->detail->sum('overall_coupon_discount_amount');
-    //                 }
-    //                 return $repeat;
-    //             });
-
-    //             $booking['repeats'] = $sortedRepeats->values()->toArray();
-
-    //             $nextService = collect($booking['repeats'])->firstWhere('booking_status', 'ongoing');
-    //             if (!$nextService) {
-    //                 $nextService = collect($booking['repeats'])->firstWhere('booking_status', 'accepted');
-    //             }
-
-    //             $booking['nextService'] = $nextService;
-    //             $booking['time']        = max(collect($booking['repeats'])->pluck('service_schedule')->flatten()->toArray());
-    //             $booking['startDate']   = min(collect($booking['repeats'])->pluck('service_schedule')->flatten()->toArray());
-    //             $booking['endDate']     = max(collect($booking['repeats'])->pluck('service_schedule')->flatten()->toArray());
-    //             $booking['totalCount']  = count($booking['repeats']);
-    //             $booking['bookingType'] = $booking['repeats'][0]['booking_type'];
-
-    //             if ($booking['bookingType'] == 'weekly') {
-    //                 $booking['weekNames'] = collect($booking['repeats'])
-    //                     ->pluck('service_schedule')
-    //                     ->map(function ($schedule) {
-    //                         return \Carbon\Carbon::parse($schedule)->format('l');
-    //                     })
-    //                     ->unique()
-    //                     ->sort()
-    //                     ->values()
-    //                     ->toArray();
-    //             }
-
-    //             $booking['completedCount'] = collect($booking['repeats'])->where('booking_status', 'completed')->count();
-    //             $booking['canceledCount']  = collect($booking['repeats'])->where('booking_status', 'canceled')->count();
-
-    //             unset($booking->repeat);
-
-    //             $booking['repeats'] = array_map(function ($repeat) {
-    //                 if (isset($repeat['repeat_histories'])) {
-    //                     unset($repeat['repeat_histories']);
-    //                 }
-    //                 return $repeat;
-    //             }, $booking['repeats']);
-    //         }
-
-    //         return response()->json(response_formatter(DEFAULT_200, $booking), 200);
-    //     }
-
-    //     return response()->json(response_formatter(DEFAULT_204), 200);
-    // }
 
     public function show(Request $request, string $id): JsonResponse
     {

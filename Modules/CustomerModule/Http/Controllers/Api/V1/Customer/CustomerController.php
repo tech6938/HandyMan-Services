@@ -18,6 +18,7 @@ use Modules\UserManagement\Entities\User;
 use Modules\UserManagement\Entities\UserAddress;
 use Illuminate\Support\Facades\Mail;
 use Modules\PaymentModule\Traits\SmsGateway;
+use function file_uploader;
 
 class CustomerController extends Controller
 {
@@ -66,82 +67,50 @@ class CustomerController extends Controller
      * @param Request $request
      * @return JsonResponse
      */
+
     public function updateProfile(Request $request): JsonResponse
     {
-        $customer = User::find(auth()->id());
 
-        if (!$customer) {
+        // $check = $this->validateUploadedFile($request, ['profile_image']);
+        // if ($check !== true) {
+        //     return $check;
+        // }
+
+        $customer = $this->customer::find($request->user()->id);
+        if (!isset($customer)) {
             return response()->json(response_formatter(DEFAULT_400), 400);
         }
 
         $validator = Validator::make($request->all(), [
-            'first_name'    => 'required|string',
-            'last_name'     => 'required|string',
-            'phone'         => 'required',
-            'email'         => 'required|email',
-            'password'      => 'nullable|min:6',
-            'profile_image' => 'nullable|image|mimes:jpg,jpeg,png,gif|max:10240',
+            'first_name' => 'required',
+            'last_name' => 'required',
+            'phone' => 'required',
+            'email' => 'required',
+            'password' => '',
+            'profile_image' => 'image|max:'. uploadMaxFileSizeInKB('image') .'|mimes:' . implode(',', array_column(IMAGEEXTENSION, 'key')),
         ]);
 
         if ($validator->fails()) {
-            return response()->json(
-                response_formatter(DEFAULT_400, null, error_processor($validator)),
-                400
-            );
+            return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
         }
 
-        // Unique phone check
-        if (
-            User::where('phone', $request->phone)
-            ->where('id', '!=', $customer->id)
-            ->exists()
-        ) {
-            return response()->json(
-                response_formatter(DEFAULT_400, null, [
-                    ["error_code" => "phone", "message" => translate('Phone already taken')]
-                ]),
-                400
-            );
+        if (User::where('phone', $request['phone'])->where('id', '!=', $customer->id)->exists()) {
+            return response()->json(response_formatter(DEFAULT_400, null, [["error_code"=>"phone","message"=>translate('Phone already taken')]]), 400);
         }
 
-        // Email change → unverify
-        if ($customer->email !== $request->email) {
+        if ($customer->email != $request['email']){
             $customer->is_email_verified = 0;
         }
 
-        // Update basic info
         $customer->first_name = $request->first_name;
-        $customer->last_name  = $request->last_name;
-        $customer->phone      = $request->phone;
-        $customer->email      = $request->email;
+        $customer->last_name = $request->last_name;
+        $customer->phone = $request->phone;
+        $customer->email = $request->email;
 
-        // ✅ Upload image to public/images/profile
-        if ($request->hasFile('profile_image')) {
-
-            $image     = $request->file('profile_image');
-            $imageName = time() . '_' . uniqid() . '.' . $image->getClientOriginalExtension();
-
-            $path = public_path('images/profile');
-
-            // Create directory if not exists
-            if (!file_exists($path)) {
-                mkdir($path, 0775, true);
-            }
-
-            // Delete old image
-            if ($customer->profile_image && file_exists($path . '/' . $customer->profile_image)) {
-                unlink($path . '/' . $customer->profile_image);
-            }
-
-            // Move image
-            $image->move($path, $imageName);
-
-            // Save filename in DB
-            $customer->profile_image = $imageName;
+        if ($request->has('profile_image')) {
+            $customer->profile_image = file_uploader('user/profile_image/', APPLICATION_IMAGE_FORMAT, $request->file('profile_image'), $customer->profile_image);;
         }
-
-        // Password update
-        if (!empty($request->password)) {
+        if (!is_null($request['password'])) {
             $customer->password = bcrypt($request->password);
         }
 

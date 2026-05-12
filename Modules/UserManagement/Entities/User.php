@@ -81,6 +81,34 @@ class User extends Authenticatable
         return $this->hasOne(StorageModel::class, 'model_id')->where('model_column', 'profile_image');
     }
 
+    // public function getProfileImageFullPathAttribute()
+    // {
+    //     $image = $this->profile_image;
+    //     $defaultPath = $this->user_type == 'customer' ? asset('public/assets/admin-module/img/customer.png') : asset('public/assets/provider-module/img/user2x.png');
+
+    //     if (!$image) {
+    //         if (request()->is('api/*')) {
+    //             $defaultPath = null;
+    //         }
+    //         return $defaultPath;
+    //     }
+
+    //     $s3Storage = $this->storage;
+    //     $path = '';
+
+    //     if ($this->user_type == 'admin-employee') {
+    //         $path = 'employee/profile/';
+    //     } else if ($this->user_type == 'customer' || $this->user_type == 'super-admin') {
+    //         $path = 'user/profile_image/';
+    //     } else if ($this->user_type == 'provider-serviceman') {
+    //         $path = 'serviceman/profile/';
+    //     }
+
+    //     $imagePath = $path . $image;
+
+    //     return getSingleImageFullPath(imagePath: $imagePath, s3Storage: $s3Storage, defaultPath: $defaultPath);
+    // }
+
     public function getProfileImageFullPathAttribute()
     {
         $image = $this->profile_image;
@@ -166,6 +194,30 @@ class User extends Authenticatable
 
         return $fullPaths;
     }
+
+    // public function getIdentificationImageFullPathAttribute()
+    // {
+    //     $identityImages = $this->identification_image ?? [];
+    //     $defaultImagePath = asset('public/assets/admin-module/img/media/provider-id.png');
+
+    //     if (empty($identityImages)) {
+    //         if (request()->is('api/*')) {
+    //             $defaultImagePath = null;
+    //         }
+    //         return $defaultImagePath ? [$defaultImagePath] : [];
+    //     }
+
+    //     $path = '';
+    //     if ($this->user_type == 'admin-employee') {
+    //         $path = 'employee/identity/';
+    //     } else if ($this->user_type == 'provider-admin') {
+    //         $path = 'provider/identity/';
+    //     } else if ($this->user_type == 'provider-serviceman') {
+    //         $path = 'serviceman/identity/';
+    //     }
+
+    //     return getIdentityImageFullPath(identityImages: $identityImages, path: $path, defaultPath: $defaultImagePath);
+    // }
 
     public function roles(): BelongsToMany
     {

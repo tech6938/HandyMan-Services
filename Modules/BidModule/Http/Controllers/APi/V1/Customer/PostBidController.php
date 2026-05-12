@@ -181,7 +181,7 @@ class PostBidController extends Controller
             'service_schedule' => !is_null($request['booking_schedule']) ? $request['booking_schedule'] : $postBid->post->booking_schedule,
             'service_id' => $postBid->post->service_id,
             'category_id' => $postBid->post->category_id,
-            'sub_category_id' => $postBid->post->category_id,
+            'sub_category_id' => $postBid->post->sub_category_id,
             'service_address_id' => !is_null($request['service_address_id']) ? $request['service_address_id'] : $postBid->post->service_address_id,
             'is_partial' => $request['is_partial']
         ];

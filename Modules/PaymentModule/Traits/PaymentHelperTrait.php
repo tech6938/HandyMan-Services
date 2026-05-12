@@ -77,7 +77,7 @@ trait PaymentHelperTrait
                 'service_schedule' => !is_null($request['booking_schedule']) ? $request['booking_schedule'] : $post_bid->post->booking_schedule,
                 'service_id' => $post_bid->post->service_id,
                 'category_id' => $post_bid->post->category_id,
-                'sub_category_id' => $post_bid->post->category_id,
+                'sub_category_id' => $post_bid->post->sub_category_id,
                 'service_address_id' => !is_null($request['service_address_id']) ? $request['service_address_id'] : $post_bid->post->service_address_id,
             ];
 

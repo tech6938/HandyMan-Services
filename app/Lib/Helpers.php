@@ -314,6 +314,13 @@ if (!function_exists('file_uploader')) {
         /**
          * Upload to storage (S3 or local)
          */
+        // if ($disk === 's3') {
+        //     Storage::disk($disk)->put($dir . $imageName, file_get_contents($savePath), ['ACL' => 'public-read']);
+        // } else {
+        //     Storage::disk($disk)->put($dir . $imageName, file_get_contents($savePath));
+        // }
+
+        // replacing this line code with above commenting code
         Storage::disk($disk)->put($dir . $imageName, file_get_contents($savePath));
 
         /**
