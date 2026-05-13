@@ -163,6 +163,36 @@ class ReviewController extends Controller
             return response()->json(response_formatter(DEFAULT_404), 200);
         }
 
+        $providerId = $booking->provider_id;
+
+        // If current booking has no provider_id,
+        // then check child booking using parent_booking_id
+        if (empty($providerId)) {
+
+            $childBooking = $this->booking
+                ->where('parent_booking_id', $booking->id)
+                ->whereNotNull('provider_id')
+                ->first();
+
+            if ($childBooking) {
+                $providerId = $childBooking->provider_id;
+            }
+        }
+
+        // Fallback from serviceman
+        if (empty($providerId) && $booking->serviceman_id) {
+            $providerId = $booking->serviceman?->provider_id;
+        }
+
+        // Final validation
+        if (empty($providerId)) {
+            return response()->json(response_formatter(
+                DEFAULT_FAIL_200,
+                null,
+                ['error' => 'Provider information not available for this booking']
+            ), 400);
+        }
+
         $images = [];
         if ($request->has('images')) {
             foreach ($request->images as $image) {
@@ -184,7 +214,7 @@ class ReviewController extends Controller
         $review->customer_id = $request->user()->id;
         $review->review_rating = $request->review_rating;
         $review->review_comment = $request->review_comment;
-        $review->provider_id = $booking->provider_id;
+        $review->provider_id = $providerId;
         $review->review_images = $images;
         $review->booking_date = $booking->created_at;
 
@@ -209,7 +239,7 @@ class ReviewController extends Controller
         $review->save();
 
 
-        foreach (['service_id' => $request->service_id, 'provider_id' => $booking->provider_id] as $key => $value) {
+        foreach (['service_id' => $request->service_id, 'provider_id' => $providerId] as $key => $value) {
             $ratingGroupCount = DB::table('reviews')->where($key, $value)
                 ->select('review_rating', DB::raw('count(*) as total'))
                 ->groupBy('review_rating')
