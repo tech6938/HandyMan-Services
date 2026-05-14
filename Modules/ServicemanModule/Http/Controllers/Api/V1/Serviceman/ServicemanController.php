@@ -97,12 +97,12 @@ class ServicemanController extends Controller
 
             $data[] = ['booking_stats' => $allBookings];
         }
-        
+
         $servicemanId = auth('api')->user()->serviceman->id;
         if (in_array('recent_bookings', $request['sections'])) {
             $bookings = $this->booking->with(['detail.service' => function ($query) {
                 $query->select('id', 'name', 'thumbnail');
-            },'repeat'])->where(function ($query) use ($servicemanId) {
+            }, 'repeat'])->where(function ($query) use ($servicemanId) {
                 $query->where('serviceman_id', $servicemanId)
                     ->orWhereHas('repeat', function ($subQuery) use ($servicemanId) {
                         $subQuery->where('serviceman_id', $servicemanId);
@@ -187,7 +187,7 @@ class ServicemanController extends Controller
         }
 
         if (User::where('email', $request['email'])->where('id', '!=', $employee->id)->exists()) {
-            return response()->json(response_formatter(DEFAULT_400, null, [['error_code' => 'email', 'message' =>translate('Email already taken')]]), 400);
+            return response()->json(response_formatter(DEFAULT_400, null, [['error_code' => 'email', 'message' => translate('Email already taken')]]), 400);
         }
 
         $employee->first_name = $request->first_name;
@@ -229,6 +229,58 @@ class ServicemanController extends Controller
     }
 
     /**
+     * Mark notification as read for serviceman
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function markNotificationAsRead(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'notification_id' => 'required|uuid|exists:push_notifications,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
+        }
+
+        try {
+            // Update notification as read
+            $notification = $this->pushNotification->findOrFail($request->notification_id);
+            $notification->update([
+                'is_read' => 1,
+                'read_at' => now()
+            ]);
+
+            $unreadCount = $this->pushNotification
+                ->where('is_read', 0)
+                ->count();
+
+            return response()->json(response_formatter(DEFAULT_200, [
+                'message' => 'Notification marked as read',
+                'unread_count' => $unreadCount
+            ]), 200);
+        } catch (\Exception $e) {
+            return response()->json(response_formatter(DEFAULT_500, null, [$e->getMessage()]), 500);
+        }
+    }
+
+    /**
+     * Get unread notification count for serviceman
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function getNotificationUnreadCount(Request $request): JsonResponse
+    {
+        $unreadCount = $this->pushNotification
+            ->where('is_read', 0)
+            ->count();
+
+        return response()->json(response_formatter(DEFAULT_200, [
+            'unread_count' => $unreadCount
+        ]), 200);
+    }
+
+    /**
      *
      * @param Request $request
      * @return JsonResponse
@@ -266,16 +318,16 @@ class ServicemanController extends Controller
                 if (isset($paymentPublishedStatus[0]['is_published'])) {
                     $publishedStatus = $paymentPublishedStatus[0]['is_published'];
                 }
-                if($publishedStatus == 1){
+                if ($publishedStatus == 1) {
                     $response = SmsGateway::send($customer->phone, $token);
-                }else{
+                } else {
                     SMS_gateway::send($customer->phone, $token);
                 }
-
-            } elseif($method == 'email') {
+            } elseif ($method == 'email') {
                 try {
                     Mail::to($customer['email'])->send(new \App\Mail\PasswordResetMail($token));
-                } catch (\Exception $exception) {}
+                } catch (\Exception $exception) {
+                }
             }
 
             return response()->json(response_formatter(DEFAULT_SENT_OTP_200), 200);
@@ -343,7 +395,6 @@ class ServicemanController extends Controller
             DB::table('password_resets')
                 ->where('phone', $request['phone_or_email'])
                 ->where(['token' => $request['otp']])->delete();
-
         } else {
             return response()->json(response_formatter(DEFAULT_404), 200);
         }
@@ -380,7 +431,7 @@ class ServicemanController extends Controller
      */
     public function changeLanguage(Request $request): JsonResponse
     {
-        if (auth('api')->user()){
+        if (auth('api')->user()) {
             $serviceman = $this->employee::find(auth('api')->user()->id);
             $serviceman->current_language_key = $request->header('X-localization') ?? 'en';
             $serviceman->save();

@@ -140,7 +140,6 @@ class ProviderController extends Controller
 
             $recentBookings = $this->booking->with(['detail.service' => function ($query) {
                 $query->select('id', 'name', 'thumbnail');
-
             }])->where('booking_status', 'pending')
                 ->whereIn('sub_category_id', $subscribedSubCategories)
                 ->when($maxBookingAmount > 0, function ($query) use ($maxBookingAmount) {
@@ -205,11 +204,11 @@ class ProviderController extends Controller
                 ->where('zone_id', $request->user()->provider->zone_id)
                 ->whereBetween('created_at', [Carbon::now()->subDays($biddingPostValidity), Carbon::now()])
                 ->when(true, function ($query) use ($request) {
-                    if($request->user()?->provider?->service_availability && (!$request->user()?->provider?->is_suspended || !business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values)){
+                    if ($request->user()?->provider?->service_availability && (!$request->user()?->provider?->is_suspended || !business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values)) {
                         $query->whereDoesntHave('bids', function ($query) use ($request) {
                             $query->where('provider_id', $request->user()->provider->id);
                         });
-                    }else{
+                    } else {
                         $query->whereNull('id');
                     }
                 })
@@ -233,11 +232,11 @@ class ProviderController extends Controller
                 ->where('zone_id', $request->user()->provider->zone_id)
                 ->whereBetween('created_at', [Carbon::now()->subDays($biddingPostValidity), Carbon::now()])
                 ->when(true, function ($query) use ($request) {
-                    if($request->user()?->provider?->service_availability && (!$request->user()?->provider?->is_suspended || !business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values)){
+                    if ($request->user()?->provider?->service_availability && (!$request->user()?->provider?->is_suspended || !business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values)) {
                         $query->whereDoesntHave('bids', function ($query) use ($request) {
                             $query->where('provider_id', $request->user()->provider->id);
                         });
-                    }else{
+                    } else {
                         $query->whereNull('id');
                     }
                 })
@@ -266,11 +265,11 @@ class ProviderController extends Controller
             $pendingBookingCount = $request->user()?->provider?->is_suspended == 0 || !business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values ? $pendingBookingCount : $recentNotBooking;
 
             $data[] = ['additional_info_count' =>
-                [
-                    'customized_post_count' => $postCount,
-                    'advertisement_count' => $advertisementCount,
-                    'pending_booking_count' => $pendingBookingCount
-                ]];
+            [
+                'customized_post_count' => $postCount,
+                'advertisement_count' => $advertisementCount,
+                'pending_booking_count' => $pendingBookingCount
+            ]];
         }
 
         return response()->json(response_formatter(DEFAULT_200, $data), 200);
@@ -463,7 +462,6 @@ class ProviderController extends Controller
                 } else {
                     SMS_gateway::send($customer->phone, $token);
                 }
-
             } elseif ($method == 'email') {
                 //mail will be sent
                 try {
@@ -471,7 +469,6 @@ class ProviderController extends Controller
                 } catch (\Exception $exception) {
                 }
             }
-
         } else {
             return response()->json(response_formatter(DEFAULT_404), 200);
         }
@@ -539,7 +536,6 @@ class ProviderController extends Controller
             DB::table('password_resets')
                 ->where('phone', $request['phone_or_email'])
                 ->where(['token' => $request['otp']])->delete();
-
         } else {
             return response()->json(response_formatter(DEFAULT_404), 200);
         }
@@ -596,6 +592,59 @@ class ProviderController extends Controller
     }
 
     /**
+     * Mark notification as read for provider
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function markNotificationAsRead(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'notification_id' => 'required|uuid|exists:push_notifications,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
+        }
+
+        try {
+            // Update notification as read
+            $notification = $this->pushNotification->findOrFail($request->notification_id);
+            $notification->update([
+                'is_read' => 1,
+                'read_at' => now()
+            ]);
+
+            // Get updated unread count
+            $unreadCount = $this->pushNotification
+                ->where('is_read', 0)
+                ->count();
+
+            return response()->json(response_formatter(DEFAULT_200, [
+                'message' => 'Notification marked as read',
+                'unread_count' => $unreadCount
+            ]), 200);
+        } catch (\Exception $e) {
+            return response()->json(response_formatter(DEFAULT_500, null, [$e->getMessage()]), 500);
+        }
+    }
+
+    /**
+     * Get unread notification count for provider
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function getNotificationUnreadCount(Request $request): JsonResponse
+    {
+        $unreadCount = $this->pushNotification
+            ->where('is_read', 0)
+            ->count();
+
+        return response()->json(response_formatter(DEFAULT_200, [
+            'unread_count' => $unreadCount
+        ]), 200);
+    }
+
+    /**
      * Display a listing of the resource.
      * @param Request $request
      * @return JsonResponse
@@ -648,7 +697,7 @@ class ProviderController extends Controller
             return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
         }
 
-        $reviews = $this->review->with(['booking.detail', 'provider', 'customer','reviewReply','service'])
+        $reviews = $this->review->with(['booking.detail', 'provider', 'customer', 'reviewReply', 'service'])
             ->where('provider_id', $request->user()->provider->id)
             ->latest()
             ->paginate($request['limit'], ['*'], 'offset', $request['offset'])->withPath('');
@@ -720,7 +769,7 @@ class ProviderController extends Controller
         $receivable = $account->account_receivable;
         $payable = $account->account_payable;
 
-        if ($receivable == $payable){
+        if ($receivable == $payable) {
 
             withdrawRequestAcceptForAdjustTransaction($request->user()->id, $receivable);
             collectCashTransaction($provider->id, $payable);
@@ -729,7 +778,6 @@ class ProviderController extends Controller
         }
 
         return response()->json(response_formatter(DEFAULT_404), 200);
-
     }
     public function transaction(Request $request): JsonResponse
     {
@@ -755,5 +803,4 @@ class ProviderController extends Controller
 
         return response()->json(response_formatter(DEFAULT_200, $filteredTransactions, 200));
     }
-
 }

@@ -17,11 +17,13 @@ class PushNotification extends Model
         'zone_ids' => 'array',
         'to_users' => 'array',
         'is_active' => 'integer',
+        'is_read' => 'boolean',
+        'read_at' => 'datetime',
     ];
 
     protected $appends = ['cover_image_full_path'];
 
-    protected $fillable = ['id', 'title', 'description', 'to_users', 'zone_ids', 'cover_image', 'is_active'];
+    protected $fillable = ['id', 'title', 'description', 'to_users', 'zone_ids', 'cover_image', 'is_active', 'is_read', 'read_at'];
 
     public function pushNotificationUser(): hasOne
     {

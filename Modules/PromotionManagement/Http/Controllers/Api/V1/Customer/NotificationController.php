@@ -53,4 +53,56 @@ class NotificationController extends Controller
 
         return response()->json(response_formatter(DEFAULT_200, $pushNotification), 200);
     }
+
+    /**
+     * Mark a notification as read
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function markAsRead(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'notification_id' => 'required|uuid|exists:push_notifications,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
+        }
+
+        try {
+            // Update notification as read
+            $notification = $this->pushNotification->findOrFail($request->notification_id);
+            $notification->update([
+                'is_read' => 1,
+                'read_at' => now()
+            ]);
+
+            // Get updated unread count
+            $unreadCount = $this->pushNotification
+                ->where('is_read', 0)
+                ->count();
+
+            return response()->json(response_formatter(DEFAULT_200, [
+                'message' => 'Notification marked as read',
+                'unread_count' => $unreadCount
+            ]), 200);
+        } catch (\Exception $e) {
+            return response()->json(response_formatter(DEFAULT_500, null, [$e->getMessage()]), 500);
+        }
+    }
+
+    /**
+     * Get unread notification count
+     * @return JsonResponse
+     */
+    public function getUnreadCount(): JsonResponse
+    {
+        $unreadCount = $this->pushNotification
+            ->where('is_read', 0)
+            ->count();
+
+        return response()->json(response_formatter(DEFAULT_200, [
+            'unread_count' => $unreadCount
+        ]), 200);
+    }
 }
