@@ -15,10 +15,23 @@ class Banner extends Model
 {
     use HasFactory, HasUuid;
 
-    protected $fillable = [];
+    protected $fillable = [
+        'banner_title',
+        'resource_type',
+        'resource_id',
+        'banner_image',
+        'redirect_link',
+        'for_both',
+        'only_service',
+        'only_category',
+        'is_active',
+    ];
 
     protected $casts = [
-        'is_active' => 'integer'
+        'is_active' => 'integer',
+        'for_both' => 'integer',
+        'only_service' => 'integer',
+        'only_category' => 'integer',
     ];
 
     protected $appends = ['banner_image_full_path'];
@@ -26,6 +39,31 @@ class Banner extends Model
     public function scopeOfStatus($query, $status)
     {
         $query->where('is_active', '=', $status);
+    }
+
+    public function scopeVisibleOnHome($query)
+    {
+        $query->where(function ($query) {
+            $query->where('for_both', 1)
+                ->orWhere('only_category', 1);
+        });
+    }
+
+    public function scopeVisibleOnService($query)
+    {
+        $query->where(function ($query) {
+            $query->where('for_both', 1)
+                ->orWhere('only_service', 1);
+        });
+    }
+
+    public function scopeVisibleForPageType($query, string $pageType = 'home')
+    {
+        if ($pageType === 'service') {
+            return $query->visibleOnService();
+        }
+
+        return $query->visibleOnHome();
     }
 
     public function category(): \Illuminate\Database\Eloquent\Relations\BelongsTo

@@ -84,9 +84,11 @@ class BannerController extends Controller
 
         $request->validate([
             'banner_title' => 'required|string|max:190',
-            'service_id' => 'uuid',
-            'category_id' => 'uuid',
+            'service_id' => 'nullable|uuid',
+            'category_id' => 'nullable|uuid',
             'resource_type' => 'required|in:service,category,link',
+            'banner_visibility' => 'required|in:for_both,only_service,only_category',
+            'redirect_link' => 'required|url|max:191',
             'banner_image' => 'required|image|max:' . uploadMaxFileSizeInKB('image') . '|mimes:' . implode(',', array_column(IMAGEEXTENSION, 'key'))
         ]);
 
@@ -94,6 +96,9 @@ class BannerController extends Controller
         $banner->banner_title = $request['banner_title'];
         $banner->redirect_link = $request['redirect_link'];
         $banner->resource_type = $request['resource_type'];
+        $banner->for_both = $request['banner_visibility'] == 'for_both' ? 1 : 0;
+        $banner->only_service = ($request['banner_visibility'] == 'only_service' || $request['banner_visibility'] == 'for_both') ? 1 : 0;
+        $banner->only_category = ($request['banner_visibility'] == 'only_category' || $request['banner_visibility'] == 'for_both') ? 1 : 0;
         if ($request['resource_type'] != 'link') {
             $resourceId = $request['resource_type'] == 'service' ? $request['service_id'] : $request['category_id'];
         } else {
@@ -143,8 +148,10 @@ class BannerController extends Controller
         $request->validate([
             'banner_title' => 'required|string|max:190',
             'resource_type' => 'required|in:service,category,link',
-            'service_id' => 'uuid',
-            'category_id' => 'uuid',
+            'service_id' => 'nullable|uuid',
+            'category_id' => 'nullable|uuid',
+            'banner_visibility' => 'required|in:for_both,only_service,only_category',
+            'redirect_link' => 'required|url|max:191',
             'banner_image' => 'image|max:'. uploadMaxFileSizeInKB('image') .'|mimes:' . implode(',', array_column(IMAGEEXTENSION, 'key'))
         ]);
 
@@ -152,6 +159,9 @@ class BannerController extends Controller
         $banner->banner_title = $request['banner_title'];
         $banner->redirect_link = $request['redirect_link'];
         $banner->resource_type = $request['resource_type'];
+        $banner->for_both = $request['banner_visibility'] == 'for_both' ? 1 : 0;
+        $banner->only_service = ($request['banner_visibility'] == 'only_service' || $request['banner_visibility'] == 'for_both') ? 1 : 0;
+        $banner->only_category = ($request['banner_visibility'] == 'only_category' || $request['banner_visibility'] == 'for_both') ? 1 : 0;
         if ($request['resource_type'] != 'link') {
             $resourceId = $request['resource_type'] == 'service' ? $request['service_id'] : $request['category_id'];
         } else {

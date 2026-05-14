@@ -116,7 +116,11 @@ class ServiceController extends Controller
                 // Service ke against jo banner upload hua sirf wahi load hoga
                 'banner' => function ($query) {
                     $query->where('is_active', 1)
-                        ->where('resource_type', 'service');
+                        ->where('resource_type', 'service')
+                        ->where(function ($query) {
+                            $query->where('for_both', 1)
+                                ->orWhere('only_service', 1);
+                        });
                 },
             ])
             ->where(function ($query) {
@@ -970,7 +974,11 @@ class ServiceController extends Controller
                 'category.category_discount',
                 'banner' => function ($query) {
                     $query->where('is_active', 1)
-                        ->where('resource_type', 'service');
+                        ->where('resource_type', 'service')
+                        ->where(function ($query) {
+                            $query->where('for_both', 1)
+                                ->orWhere('only_service', 1);
+                        });
                 },
             ])
             ->where('sub_category_id', $subCategoryId)

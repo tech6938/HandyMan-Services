@@ -84,11 +84,42 @@
                                         <div class="form-floating form-floating__icon mb-30"
                                             style="display: {{ $banner->resource_type == 'link' ? 'block' : 'none' }}"
                                             id="link_selector">
-                                            <input type="url" class="form-control"
+                                            <input type="url" class="form-control" name="redirect_link" required
                                                 placeholder="{{ translate('redirect_link') }}"
-                                                value="{{ $banner->redirect_link }}">
+                                                value="{{ old('redirect_link', $banner->redirect_link) }}">
                                             <label>{{ translate('redirect_link') }}</label>
                                             <span class="material-icons">link</span>
+                                        </div>
+
+                                        <div class="form-floating form-floating__icon mb-30">
+                                            <input type="url" class="form-control"
+                                                placeholder="{{ translate('redirect_link') }}" name="redirect_link"
+                                                 value="{{ old('redirect_link', $banner->redirect_link) }}" required>
+                                            <label>{{ translate('redirect_link') }}</label>
+                                            <span class="material-icons">link</span>
+                                        </div>
+
+                                        <div class="mb-3">{{ translate('banner_visibility') }}</div>
+                                        <div class="d-flex flex-wrap align-items-center gap-4 mb-30">
+                                            <div class="custom-radio">
+                                                <input type="radio" id="visibility_for_both" name="banner_visibility"
+                                                    value="for_both" {{ $banner->both ? 'checked' : '' }}>
+                                                <label for="visibility_for_both">{{ translate('for_both') }}</label>
+                                            </div>
+                                            <div class="custom-radio">
+                                                <input type="radio" id="visibility_only_service" name="banner_visibility"
+                                                    value="only_service"
+                                                    {{ $banner->only_service && !$banner->both ? 'checked' : '' }}>
+                                                <label
+                                                    for="visibility_only_service">{{ translate('only_service') }}</label>
+                                            </div>
+                                            <div class="custom-radio">
+                                                <input type="radio" id="visibility_only_category" name="banner_visibility"
+                                                    value="only_category"
+                                                    {{ $banner->only_category && !$banner->both ? 'checked' : '' }}>
+                                                <label
+                                                    for="visibility_only_category">{{ translate('only_category') }}</label>
+                                            </div>
                                         </div>
 
                                     </div>
@@ -110,8 +141,8 @@
 
                                             <p class="opacity-75 max-w220 mx-auto">
                                                 {{ translate('Image format - jpg,
-                                                                                                png, jpeg, gif Image Size - maximum size 2 MB Image
-                                                                                                Ratio - 2:1') }}
+                                                                                                                                                                                                png, jpeg, gif Image Size - maximum size 2 MB Image
+                                                                                                                                                                                                Ratio - 2:1') }}
                                             </p>
                                         </div>
                                     </div>

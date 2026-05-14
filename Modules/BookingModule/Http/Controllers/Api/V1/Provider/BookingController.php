@@ -881,12 +881,7 @@ class BookingController extends Controller
             ) {
                 return response()->json(response_formatter(OTP_VERIFICATION_FAIL_403), 200);
             }
-            // if ($request->has('evidence_photos')) {
-            //     foreach ($request->evidence_photos as $image) {
-            //         $imageName = file_uploader('booking/evidence/', APPLICATION_IMAGE_FORMAT, $image);
-            //         $evidence_photos[] = ['image' => $imageName, 'storage' => getDisk()];
-            //     }
-            // }
+            
             if ($request->has('evidence_photos')) {
                 foreach ($request->evidence_photos as $image) {
                     $evidence_photos[] = ['image' => file_uploader('booking/evidence/', 'png', $image), 'storage' => getDisk()];

@@ -65,7 +65,9 @@ class BannerController extends Controller
         $validator = Validator::make($request->all(), [
             'banner_title' => 'required',
             'resource_type' => 'required|in:service,category,link',
-            'resource_id' => 'uuid',
+            'resource_id' => 'nullable|uuid',
+            'banner_visibility' => 'required|in:for_both,only_service,only_category',
+            'redirect_link' => 'required|url|max:191',
             'banner_image' => 'required|image|mimes:jpeg,jpg,png,gif|max:10000'
         ]);
 
@@ -77,6 +79,9 @@ class BannerController extends Controller
         $banner->banner_title = $request['banner_title'];
         $banner->redirect_link = $request['redirect_link'];
         $banner->resource_type = $request['resource_type'];
+        $banner->for_both = $request['banner_visibility'] == 'for_both' ? 1 : 0;
+        $banner->only_service = ($request['banner_visibility'] == 'only_service' || $request['banner_visibility'] == 'for_both') ? 1 : 0;
+        $banner->only_category = ($request['banner_visibility'] == 'only_category' || $request['banner_visibility'] == 'for_both') ? 1 : 0;
         $banner->resource_id = $request['resource_id'];
         $banner->banner_image = file_uploader('banner/', 'png', $request->file('banner_image'));
         $banner->is_active = 1;
@@ -112,7 +117,9 @@ class BannerController extends Controller
         $validator = Validator::make($request->all(), [
             'banner_title' => 'required',
             'resource_type' => 'required|in:service,category,link',
-            'resource_id' => 'uuid',
+            'resource_id' => 'nullable|uuid',
+            'banner_visibility' => 'required|in:for_both,only_service,only_category',
+            'redirect_link' => 'required|url|max:191',
             'banner_image' => 'image|mimes:jpeg,jpg,png,gif|max:10000'
         ]);
 
@@ -124,6 +131,9 @@ class BannerController extends Controller
         $banner->banner_title = $request['banner_title'];
         $banner->redirect_link = $request['redirect_link'];
         $banner->resource_type = $request['resource_type'];
+        $banner->for_both = $request['banner_visibility'] == 'for_both' ? 1 : 0;
+        $banner->only_service = ($request['banner_visibility'] == 'only_service' || $request['banner_visibility'] == 'for_both') ? 1 : 0;
+        $banner->only_category = ($request['banner_visibility'] == 'only_category' || $request['banner_visibility'] == 'for_both') ? 1 : 0;
         $banner->resource_id = $request['resource_id'];
         $banner->banner_image = file_uploader('banner/', 'png', $request->file('banner_image'), $banner->banner_image);
         $banner->save();

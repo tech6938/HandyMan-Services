@@ -105,40 +105,6 @@ class ReviewController extends Controller
         return response()->json(response_formatter(DEFAULT_STORE_200, $transformedServices), 200);
     }
 
-    // public function index(Request $request): JsonResponse
-    // {
-    //     $validator = Validator::make($request->all(), [
-    //         'booking_id' => 'required|uuid',
-    //     ]);
-
-
-    //     if ($validator->fails()) {
-    //         return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
-    //         }
-
-    //         $booking_id = $request->booking_id;
-    //         $customer_id = $request->user()->id;
-    //         dd($booking_id, $customer_id);
-
-    //     $reviews = $this->service
-    //         ->whereHas('bookings', function ($query) use ($booking_id) {
-    //             $query->where('booking_id', $booking_id);
-    //         })
-    //         ->with(['reviews' => function ($query) use ($customer_id, $booking_id) {
-    //             $query->where('customer_id', $customer_id)
-    //                 ->whereHas('booking', function ($query) use ($booking_id) {
-    //                     $query->where('id', $booking_id);
-    //                 })
-    //                 ->with('reviewReply');
-    //         }])
-    //         ->withoutGlobalScope('zone_wise_data')
-    //         ->orderBy('created_at', 'desc')
-    //         ->get();
-
-
-    //     return response()->json(response_formatter(DEFAULT_STORE_200, $reviews), 200);
-    // }
-
     /**
      * Store a newly created resource in storage.
      * @param Request $request

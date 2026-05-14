@@ -57,19 +57,37 @@
                                                     @endforeach
                                                 </select>
                                             </div>
-                                            <div class="mb-30 service_selector" id="service_selector">
+                                            <div class="mb-30 service_selector" id="service_selector" style="display: none;">
                                                 <select class="js-select theme-input-style w-100" name="service_id">
                                                     @foreach ($services as $service)
                                                         <option value="{{ $service->id }}">{{ $service->name }}</option>
                                                     @endforeach
                                                 </select>
                                             </div>
-                                            <div class="form-floating form-floating__icon mb-30 link_selector"
-                                                id="link_selector">
+                                            <div class="form-floating form-floating__icon mb-30">
                                                 <input type="url" class="form-control"
-                                                    placeholder="{{ translate('redirect_link') }}" name="redirect_link">
+                                                    placeholder="{{ translate('redirect_link') }}" name="redirect_link" required>
                                                 <label>{{ translate('redirect_link') }}</label>
                                                 <span class="material-icons">link</span>
+                                            </div>
+
+                                            <div class="mb-3">{{ translate('banner_visibility') }}</div>
+                                            <div class="d-flex flex-wrap align-items-center gap-4 mb-30">
+                                                <div class="custom-radio">
+                                                    <input type="radio" id="visibility_for_both" name="banner_visibility"
+                                                        value="for_both" {{ old('banner_visibility', 'only_category') == 'for_both' ? 'checked' : '' }}>
+                                                    <label for="visibility_for_both">{{ translate('for_both') }}</label>
+                                                </div>
+                                                <div class="custom-radio">
+                                                    <input type="radio" id="visibility_only_service" name="banner_visibility"
+                                                        value="only_service" {{ old('banner_visibility') == 'only_service' ? 'checked' : '' }}>
+                                                    <label for="visibility_only_service">{{ translate('only_service') }}</label>
+                                                </div>
+                                                <div class="custom-radio">
+                                                    <input type="radio" id="visibility_only_category" name="banner_visibility"
+                                                        value="only_category" {{ old('banner_visibility', 'only_category') == 'only_category' ? 'checked' : '' }}>
+                                                    <label for="visibility_only_category">{{ translate('only_category') }}</label>
+                                                </div>
                                             </div>
 
                                         </div>

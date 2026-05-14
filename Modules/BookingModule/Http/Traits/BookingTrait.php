@@ -21,6 +21,7 @@ use Modules\BookingModule\Entities\Booking;
 use Modules\ServiceManagement\Entities\Service;
 use Modules\BookingModule\Entities\BookingDetail;
 use Modules\ProviderManagement\Entities\Provider;
+use Modules\ServiceManagement\Entities\ServiceCommission;
 use Modules\BookingModule\Events\BookingRequested;
 use Modules\BookingModule\Entities\BookingDetailsAmount;
 use Modules\BookingModule\Entities\BookingOfflinePayment;
@@ -2048,9 +2049,19 @@ trait BookingTrait
         $promotionalCostByAdmin = 0;
         $providerEarning = 0;
 
-        foreach ($bookingDetailsAmounts as $bookingDetailsAmount) {
-            $servicePrice = (float) $bookingDetailsAmount->service_unit_cost * (int) $bookingDetailsAmount->service_quantity;
+        $bookingDetailIds = $bookingDetailsAmounts->pluck('booking_details_id')->filter()->all();
+        $bookingDetails = BookingDetail::whereIn('id', $bookingDetailIds)->get()->keyBy('id');
+        $serviceIds = $bookingDetails->pluck('service_id')->filter()->unique()->all();
+        $serviceCommissions = ServiceCommission::whereIn('service_id', $serviceIds)
+            ->whereNull('deleted_at')
+            ->get()
+            ->keyBy('service_id');
 
+        foreach ($bookingDetailsAmounts as $bookingDetailsAmount) {
+            $bookingDetail = $bookingDetails->get($bookingDetailsAmount->booking_details_id);
+            $serviceCommission = $bookingDetail ? $serviceCommissions->get($bookingDetail->service_id) : null;
+
+            $servicePrice = (float) $bookingDetailsAmount->service_unit_cost * (int) $bookingDetailsAmount->service_quantity;
             $adminPromotionShare = (float) $bookingDetailsAmount->discount_by_admin
                 + (float) $bookingDetailsAmount->coupon_discount_by_admin
                 + (float) $bookingDetailsAmount->campaign_discount_by_admin;
@@ -2065,13 +2076,22 @@ trait BookingTrait
                 - $providerPromotionShare;
 
             $lineCommissionBase = max(0, $servicePrice - $providerPromotionShare);
-            $lineAdminCommission = $isSubscriptionBooking
-                ? 0
-                : round(($lineCommissionBase * $commissionPercentage) / 100, 2);
 
-            $lineProviderEarning = $isSubscriptionBooking
-                ? round($lineTotalCost, 2)
-                : round($lineTotalCost - $lineAdminCommission + $adminPromotionShare, 2);
+            if ($bookingDetail && $serviceCommission) {
+                $commissionDetails = $this->calculateServiceCommission($bookingDetail, $serviceCommission);
+                $lineAdminCommission = $commissionDetails['commission_amount'];
+                $lineProviderEarning = $isSubscriptionBooking
+                    ? round($lineTotalCost, 2)
+                    : round($lineTotalCost - $lineAdminCommission + $adminPromotionShare, 2);
+            } else {
+                $lineAdminCommission = $isSubscriptionBooking
+                    ? 0
+                    : round(($lineCommissionBase * $commissionPercentage) / 100, 2);
+
+                $lineProviderEarning = $isSubscriptionBooking
+                    ? round($lineTotalCost, 2)
+                    : round($lineTotalCost - $lineAdminCommission + $adminPromotionShare, 2);
+            }
 
             $bookingDetailsAmount->admin_commission = $lineAdminCommission;
             $bookingDetailsAmount->provider_earning = max(0, $lineProviderEarning);
@@ -2089,6 +2109,40 @@ trait BookingTrait
         ];
     }
 
+    private function calculateServiceCommission($bookingDetail, ?ServiceCommission $serviceCommission = null): array
+    {
+        if (!$serviceCommission) {
+            $serviceCommission = ServiceCommission::where('service_id', $bookingDetail->service_id)
+                ->whereNull('deleted_at')
+                ->first();
+        }
+
+        if (!$serviceCommission) {
+            return [
+                'commission_type' => null,
+                'commission_amount' => 0,
+                'provider_earning' => 0,
+            ];
+        }
+
+        $serviceCost = (float) $bookingDetail->service_cost;
+        $quantity = (int) $bookingDetail->quantity;
+        $baseAmount = $serviceCost * $quantity;
+
+        if ($serviceCommission->commission_type === 'percentage') {
+            $commissionAmount = round(($serviceCost * $serviceCommission->commission / 100) * $quantity, 2);
+        } else {
+            $commissionAmount = round($serviceCommission->commission * $quantity, 2);
+        }
+
+        $providerEarning = max(0, round($baseAmount - $commissionAmount, 2));
+
+        return [
+            'commission_type' => $serviceCommission->commission_type,
+            'commission_amount' => $commissionAmount,
+            'provider_earning' => $providerEarning,
+        ];
+    }
 
     public function calculateCommissionDetails($booking): array
     {
