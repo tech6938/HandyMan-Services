@@ -39,6 +39,7 @@ Route::group(['prefix' => 'provider', 'as' => 'provider.', 'namespace' => 'Api\V
     Route::get('adjust', 'ProviderController@adjust');
     Route::get('notifications', 'ProviderController@notifications');
     Route::post('notifications/mark-as-read', 'ProviderController@markNotificationAsRead');
+    Route::post('notifications/mark-all-read', 'ProviderController@markAllNotificationsAsRead');
     Route::get('notifications/unread-count', 'ProviderController@getNotificationUnreadCount');
     Route::put('update/fcm-token', 'ProviderController@updateFcmToken');
     Route::put('update/profile', 'ProviderController@updateProfile');

@@ -92,6 +92,44 @@ class NotificationController extends Controller
     }
 
     /**
+     * Mark all notifications as read for the current customer.
+     * @return JsonResponse
+     */
+    public function markAllAsRead(): JsonResponse
+    {
+        try {
+            $query = $this->pushNotification->ofStatus(1)
+                ->when(!is_null(Config::get('zone_id')), function ($query) {
+                    $query->whereJsonContains('zone_ids', Config::get('zone_id'));
+                })
+                ->where(function ($query) {
+                    $query->whereDoesntHave('pushNotificationUser')
+                        ->orWhereHas('pushNotificationUser', function ($query) {
+                            $query->where('user_id', $this->customer_user_id);
+                        });
+                })
+                ->where('to_users', 'like', '%"customer"%');
+
+            $query->update([
+                'is_read' => 1,
+                'read_at' => now()
+            ]);
+
+            $unreadCount = $this->pushNotification
+                ->where('is_read', 0)
+                ->count();
+
+            return response()->json(response_formatter(DEFAULT_200, [
+                'message' => 'All notifications marked as read',
+                'unread_count' => $unreadCount
+            ]), 200);
+
+        } catch (\Exception $e) {
+            return response()->json(response_formatter(DEFAULT_500, null, [$e->getMessage()]), 500);
+        }
+    }
+
+    /**
      * Get unread notification count
      * @return JsonResponse
      */

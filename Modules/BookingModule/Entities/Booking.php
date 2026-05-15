@@ -344,7 +344,11 @@ class Booking extends Model
                     if (!$model->is_guest && $model?->customer) {
                         $model->referral_earning_calculation($model->customer_id, $model->zone_id);
 
-                        $model->loyaltyPointCalculation($model->customer_id, $model->total_booking_amount, $model->id, 'booking');
+                        if (is_null($model->parent_booking_id) && $model->childBookings()->exists()) {
+                            // Parent summary booking with child services: loyalty is awarded per completed child booking only.
+                        } else {
+                            $model->loyaltyPointCalculation($model->customer_id, $model->total_booking_amount, $model->id, 'booking');
+                        }
 
                         if ($model->total_referral_discount_amount > 0) {
                             referralEarningTransactionAfterBookingCompleteFirst($model->customer, $model->total_referral_discount_amount, $model->id);

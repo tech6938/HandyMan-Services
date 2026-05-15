@@ -265,13 +265,44 @@ class ServicemanController extends Controller
     }
 
     /**
+     * Mark all notifications as read for the current serviceman.
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function markAllNotificationsAsRead(Request $request): JsonResponse
+    {
+        try {
+            $this->pushNotification->ofStatus(1)
+                ->whereJsonContains('to_users', PROVIDER_USER_TYPES[2])
+                ->whereJsonContains('zone_ids', $request->user()->serviceman->provider->zone_id)
+                ->update([
+                    'is_read' => 1,
+                    'read_at' => now()
+                ]);
+
+            $unreadCount = $this->pushNotification
+                ->where('is_read', 0)
+                ->count();
+
+            return response()->json(response_formatter(DEFAULT_200, [
+                'message' => 'All notifications marked as read',
+                'unread_count' => $unreadCount
+            ]), 200);
+        } catch (\Exception $e) {
+            return response()->json(response_formatter(DEFAULT_500, null, [$e->getMessage()]), 500);
+        }
+    }
+
+    /**
      * Get unread notification count for serviceman
      * @param Request $request
      * @return JsonResponse
      */
     public function getNotificationUnreadCount(Request $request): JsonResponse
     {
-        $unreadCount = $this->pushNotification
+        $unreadCount = $this->pushNotification->ofStatus(1)
+            ->whereJsonContains('to_users', PROVIDER_USER_TYPES[2])
+            ->whereJsonContains('zone_ids', $request->user()->serviceman->provider->zone_id)
             ->where('is_read', 0)
             ->count();
 

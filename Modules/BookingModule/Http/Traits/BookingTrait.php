@@ -2272,8 +2272,22 @@ trait BookingTrait
      * @param $bookingAmount
      * @return false|void
      */
-    // private function loyaltyPointCalculation($userId, $bookingAmount, $referenceId = null, $referenceType = 'booking')
+    //  private function loyaltyPointCalculation($userId, $bookingAmount, $referenceId = null, $referenceType = 'booking')
     // {
+    //     // Get the booking details
+    //     $booking = Booking::find($referenceId);
+
+    //     // CRITICAL: Only process parent bookings (parent_booking_id is NULL)
+    //     // Skip child/repeat bookings completely - no points, no notifications
+    //     if ($booking && !is_null($booking->parent_booking_id)) {
+    //         Log::info('Loyalty Point - Skipping child booking', [
+    //             'user_id' => $userId,
+    //             'child_booking_id' => $referenceId,
+    //             'parent_booking_id' => $booking->parent_booking_id,
+    //             'reason' => 'Loyalty points only for parent bookings'
+    //         ]);
+    //         return true; // Exit silently, no points awarded for child bookings
+    //     }
 
     //     $customerLoyaltyPoint = business_config('customer_loyalty_point', 'customer_config');
     //     if (isset($customerLoyaltyPoint) && $customerLoyaltyPoint->live_values != '1') return false;
@@ -2285,26 +2299,74 @@ trait BookingTrait
 
     //     $point = $pointPerCurrencyUnit->live_values * $pointAmount;
 
+    //     // Only award points for parent bookings
     //     $isCredited = loyaltyPointTransaction($userId, $point, $referenceId, $referenceType);
     //     if (!$isCredited) {
     //         return false;
     //     }
 
     //     $user = User::where('id', $userId)->first();
+
+    //     // Check if loyalty point notifications are enabled in admin panel
+    //     $customerNotification = false;
+
+    //     $settings = DB::table('business_settings')
+    //         ->where('key_name', 'loyalty_point')
+    //         ->where('settings_type', 'notification_settings')
+    //         ->first();
+
+    //     if ($settings && $settings->live_values) {
+    //         $values = json_decode($settings->live_values, true);
+    //         if (is_array($values)) {
+    //             $customerNotification = $values['loyalty_point_status'] ?? false;
+    //         }
+    //     }
+
+    //     if (!$customerNotification) {
+    //         $customerNotification = isNotificationActive(null, 'loyalty_point', 'notification', 'user');
+    //     }
+
     //     $message = get_push_notification_message('loyalty_point', 'customer_notification', $user?->current_language_key);
     //     $message = (is_string($message) && trim($message) !== '' && $message !== '0')
     //         ? trim($message)
     //         : 'loyalty points added to your account';
-    //     $formattedPoint = number_format((float) $point, 0, '.', '');
-    //     $title = $formattedPoint . ' loyalty points earned';
-    //     $description = 'You earned ' . $formattedPoint . ' ' . $message . '.';
 
-    //     $customerNotification = isNotificationActive(null, 'loyalty_point', 'notification', 'user');
+    //     $formattedPoint = number_format((float) $point, 0, '.', '');
+    //     $title = $formattedPoint . ' ' . ($message ?: 'loyalty points earned');
+    //     $description = 'You earned ' . $formattedPoint . ' loyalty points from booking #' . ($booking?->readable_id ?? $referenceId) . '.';
+
     //     $dataInfo = [
     //         'user_name' => $user?->first_name . ' ' . $user?->last_name,
+    //         'points' => $formattedPoint,
+    //         'booking_id' => $referenceId,
+    //         'booking_readable_id' => $booking?->readable_id,
+    //         'transaction_type' => 'loyalty_point_earning'
     //     ];
+
+    //     // Log::info('Loyalty Point - Parent Booking Processing', [
+    //     //     'user_id' => $userId,
+    //     //     'booking_id' => $referenceId,
+    //     //     'parent_booking_id' => $booking->parent_booking_id ?? 'NULL (Parent)',
+    //     //     'points' => $formattedPoint,
+    //     //     'notification_permission' => $customerNotification
+    //     // ]);
+
     //     if ($title && $user && $user->is_active && $user->fcm_token && $customerNotification) {
-    //         device_notification($user->fcm_token, $title, $description, null, null, 'loyalty_point', null, $user->id, $dataInfo);
+    //         // Log::info('Sending Loyalty Point Notification', [
+    //         //     'user_id' => $userId,
+    //         //     'points' => $formattedPoint,
+    //         //     'booking_id' => $referenceId,
+    //         //     'booking_readable_id' => $booking?->readable_id
+    //         // ]);
+    //         device_notification($user->fcm_token, $title, $description, null, $referenceId, 'loyalty_point', null, $user->id, $dataInfo);
+    //         return true;
+    //     } else {
+    //         // Log::warning('Loyalty Point Notification NOT sent', [
+    //         //     'user_id' => $userId,
+    //         //     'booking_id' => $referenceId,
+    //         //     'reason' => !$customerNotification ? 'Notification disabled in admin' : 'Missing user/fcm'
+    //         // ]);
+    //         return false;
     //     }
     // }
 
@@ -2313,16 +2375,15 @@ trait BookingTrait
         // Get the booking details
         $booking = Booking::find($referenceId);
 
-        // CRITICAL: Only process parent bookings (parent_booking_id is NULL)
-        // Skip child/repeat bookings completely - no points, no notifications
-        if ($booking && !is_null($booking->parent_booking_id)) {
-            Log::info('Loyalty Point - Skipping child booking', [
+        // Parent summary booking with child bookings should not award loyalty points.
+        // Reward only single bookings or completed child bookings.
+        if ($booking && is_null($booking->parent_booking_id) && $booking->childBookings()->exists()) {
+            Log::info('Loyalty Point - Skipping parent summary booking', [
                 'user_id' => $userId,
-                'child_booking_id' => $referenceId,
-                'parent_booking_id' => $booking->parent_booking_id,
-                'reason' => 'Loyalty points only for parent bookings'
+                'booking_id' => $referenceId,
+                'reason' => 'Loyalty points are awarded per child booking',
             ]);
-            return true; // Exit silently, no points awarded for child bookings
+            return true;
         }
 
         $customerLoyaltyPoint = business_config('customer_loyalty_point', 'customer_config');
@@ -2335,7 +2396,12 @@ trait BookingTrait
 
         $point = $pointPerCurrencyUnit->live_values * $pointAmount;
 
-        // Only award points for parent bookings
+        // Prevent zero-point transactions
+        if ($point <= 0) {
+            return false;
+        }
+
+        // Award points for single bookings or completed child bookings
         $isCredited = loyaltyPointTransaction($userId, $point, $referenceId, $referenceType);
         if (!$isCredited) {
             return false;

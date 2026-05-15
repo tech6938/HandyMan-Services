@@ -40,6 +40,7 @@ Route::group(['prefix' => 'serviceman', 'as' => 'serviceman.', 'namespace' => 'A
         Route::put('update/fcm-token', 'ServicemanController@updateFcmToken');
         Route::get('push-notifications', 'ServicemanController@pushNotifications');
         Route::post('push-notifications/mark-as-read', 'ServicemanController@markNotificationAsRead');
+        Route::post('push-notifications/mark-all-read', 'ServicemanController@markAllNotificationsAsRead');
         Route::get('push-notifications/unread-count', 'ServicemanController@getNotificationUnreadCount');
 
         Route::group(['prefix' => 'profile', 'middleware' => ['auth:api']], function () {

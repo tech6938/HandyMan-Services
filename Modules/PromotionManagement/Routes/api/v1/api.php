@@ -44,6 +44,7 @@ Route::group(['prefix' => 'customer', 'as' => 'customer.', 'namespace' => 'Api\V
     Route::group(['prefix' => 'notification', 'as' => 'notification.',], function () {
         Route::get('/', 'NotificationController@index');
         Route::post('mark-as-read', 'NotificationController@markAsRead');
+        Route::post('mark-all-read', 'NotificationController@markAllAsRead');
         Route::get('unread-count', 'NotificationController@getUnreadCount');
     });
 
