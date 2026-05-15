@@ -487,7 +487,15 @@ class Booking extends Model
                                 ? Booking::with('customer')->find($model->parent_booking_id)
                                 : null;
                             $user = $model?->customer ?? $parentBooking?->customer;
-                            $bookingIdForNotification = $model->parent_booking_id ?? $model->id;
+
+                            // If this is a parent summary booking that has child bookings,
+                            // skip customer notification here — child bookings will send notifications.
+                            if (is_null($model->parent_booking_id) && $model->childBookings()->exists()) {
+                                continue;
+                            }
+
+                            // Always reference the current booking (child or single booking)
+                            $bookingIdForNotification = $model->id;
                             $repeatOrRegular = $model?->is_repeated ? 'repeat' : 'regular';
                             $title = get_push_notification_message($key, $settingsType, $user?->current_language_key);
                             $permission = isNotificationActive(null, 'booking', 'notification', 'user');
@@ -646,21 +654,18 @@ class Booking extends Model
                     $key = $notification['key'];
                     $settingsType = $notification['settings_type'];
 
-                    // if ($settingsType == 'customer_notification') {
-                    //     $user = $model?->customer;
-                    //     $repeatOrRegular = $model?->is_repeated ? 'repeat' : 'regular';
-                    //     $title = get_push_notification_message($key, $settingsType, $user?->current_language_key);
-                    //     if ($user?->fcm_token && $title) {
-                    //         device_notification($user?->fcm_token, $title, null, null, $model->id, 'booking', null, null, null, null, $repeatOrRegular);
-                    //     }
-                    // }
-
                     if ($settingsType == 'customer_notification') {
                         $parentBooking = !is_null($model->parent_booking_id)
                             ? Booking::with('customer')->find($model->parent_booking_id)
                             : null;
                         $user = $model?->customer ?? $parentBooking?->customer;
-                        $bookingIdForNotification = $model->parent_booking_id ?? $model->id;
+
+                        // If parent summary booking has child bookings, skip notifying here.
+                        if (is_null($model->parent_booking_id) && $model->childBookings()->exists()) {
+                            continue;
+                        }
+
+                        $bookingIdForNotification = $model->id;
                         $repeatOrRegular = $model?->is_repeated ? 'repeat' : 'regular';
                         $title = get_push_notification_message($key, $settingsType, $user?->current_language_key);
                         if ($user?->fcm_token && $title) {
