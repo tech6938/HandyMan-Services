@@ -223,11 +223,28 @@ class BookingController extends Controller
         ]);
 
         $webPage = $request->has('web_page') ? $request['web_page'] : 'details';
-        $booking = $this->booking->with(['detail.service' => fn($query) => $query->withTrashed(), 'detail.service.category', 'detail.service.subCategory', 'detail.variation', 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user'])->find($id);
+        $booking = $this->booking->with([
+            'detail.service' => fn($query) => $query->withTrashed(),
+            'detail.service.category',
+            'detail.service.subCategory',
+            'detail.variation',
+            'customer',
+            'provider',
+            'service_address',
+            'serviceman',
+            'service_address',
+            'status_histories.user',
+            'booking_partial_payments',
+            'parentBooking.booking_partial_payments',
+        ])->find($id);
 
         if ($booking['booking_status'] != 'pending' && $booking['provider_id'] != $request->user()->provider->id) {
             Toastr::error(translate(ACCESS_DENIED['message']));
             return redirect(route('provider.booking.list', ['booking_status' => 'accepted']));
+        }
+
+        if ($booking?->parent_booking_id) {
+            $booking->setRelation('booking_partial_payments', $booking->parentBooking->booking_partial_payments ?? collect());
         }
 
         if ($request->web_page == 'details') {
@@ -248,7 +265,7 @@ class BookingController extends Controller
             $customerAddress = $this->userAddress->find($booking['service_address_id']);
             $zones = Zone::ofStatus(1)->get();
 
-            return view('bookingmodule::provider.booking.details', compact('booking', 'servicemen', 'webPage', 'customerAddresses', 'category', 'subCategory', 'services', 'customerAddress', 'zones'));
+            return view('bookingmodule::provider.booking.details', compact('booking', 'servicemen','webPage', 'customerAddresses', 'category', 'subCategory', 'services', 'customerAddress', 'zones'));
 
         } elseif ($request->web_page == 'status') {
             $servicemen = $this->serviceman->with(['user'])

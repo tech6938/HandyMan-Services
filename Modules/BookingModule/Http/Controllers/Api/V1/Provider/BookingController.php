@@ -464,7 +464,7 @@ class BookingController extends Controller
             'serviceman.user',
             'booking_partial_payments',
             'booking_offline_payments',
-            'parentBooking',
+            'parentBooking.booking_partial_payments',
             'repeat.detail.service',
             'repeat.repeatHistories',
         ])
@@ -478,6 +478,10 @@ class BookingController extends Controller
 
         if (!isset($booking)) {
             return response()->json(response_formatter(DEFAULT_204), 200);
+        }
+
+        if ($booking->parentBooking?->booking_partial_payments->isNotEmpty()) {
+            $booking->setRelation('booking_partial_payments', $booking->parentBooking->booking_partial_payments);
         }
 
         $offlinePayment = $booking->booking_offline_payments?->first();
@@ -881,7 +885,7 @@ class BookingController extends Controller
             ) {
                 return response()->json(response_formatter(OTP_VERIFICATION_FAIL_403), 200);
             }
-            
+
             if ($request->has('evidence_photos')) {
                 foreach ($request->evidence_photos as $image) {
                     $evidence_photos[] = ['image' => file_uploader('booking/evidence/', 'png', $image), 'storage' => getDisk()];
