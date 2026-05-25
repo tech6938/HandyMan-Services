@@ -43,7 +43,7 @@ class Booking extends Model
     use HasFactory, HasUuid, BookingTrait, BookingScopes;
 
     protected $casts = [
-        'readable_id' => 'integer',
+        'readable_id' => 'string',
         'is_paid' => 'integer',
         'is_verified' => 'integer',
         'skip_refund' => 'boolean',
@@ -234,7 +234,12 @@ class Booking extends Model
         parent::boot();
 
         self::creating(function ($model) {
-            $model->readable_id = $model->count() + 100000;
+            // *** OLD LOGIC - COMMENTED OUT ***
+            // Old logic was: $model->readable_id = $model->count() + 100000;
+            // This was problematic because it could cause duplicates
+            
+            // NEW LOGIC: Generate readable_id in HC format (HC101, HC102, etc.)
+            $model->readable_id = generate_booking_readable_id();
         });
 
         self::created(function ($model) {
@@ -355,15 +360,78 @@ class Booking extends Model
                         }
                     }
 
+                    //================ Transactions for Booking ===========Old=====
+
+                    // if ($model?->provider) {
+                    //     if ($model->booking_partial_payments->isNotEmpty()) {
+                    //         if ($model['payment_method'] == 'cash_after_service') {
+                    //             $booking_partial_payment = new BookingPartialPayment;
+                    //             $booking_partial_payment->booking_id = $model->id;
+                    //             $booking_partial_payment->paid_with = 'cash_after_service';
+                    //             $booking_partial_payment->paid_amount = $model->booking_partial_payments->first()?->due_amount;
+                    //             $booking_partial_payment->due_amount = 0;
+                    //             $booking_partial_payment->save();
+
+                    //             completeBookingTransactionForPartialCas($model);
+                    //         } elseif ($model['payment_method'] != 'wallet_payment') {
+                    //             completeBookingTransactionForPartialDigital($model);
+                    //         }
+                    //     } elseif ($model->payment_method == 'cash_after_service') {
+                    //         completeBookingTransactionForCashAfterService($model);
+                    //     } else {
+                    //         if ($model->additional_charge == 0) {
+                    //             completeBookingTransactionForDigitalPayment($model);
+                    //         }
+
+                    //         if ($model->additional_charge > 0) {
+                    //             completeBookingTransactionForDigitalPaymentAndExtraService($model);
+                    //         }
+                    //     }
+
+                    //     $limit_status = provider_warning_amount_calculate($provider->owner->account->account_payable, $provider->owner->account->account_receivable);
+
+                    //     if ($limit_status == '100_percent' && business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values) {
+                    //         $provider->is_suspended = 1;
+                    //         $provider->save();
+
+                    //         $notification = isNotificationActive($provider?->id, 'transaction', 'notification', 'provider');
+                    //         $title = get_push_notification_message('provider_suspend', 'provider_notification', $provider?->owner?->current_language_key);
+                    //         if ($provider?->owner?->fcm_token && $title && $notification) {
+                    //             device_notification($provider?->owner?->fcm_token, $title, null, null, $model->id, 'suspend', null, $provider->id);
+                    //         }
+
+                    //         try {
+                    //             // Mail::to($provider?->owner?->email)->send(new CashInHandOverflowMail($provider));
+                    //         } catch (\Exception $exception) {
+                    //             info($exception);
+                    //         }
+                    //     }
+                    // }
                     //================ Transactions for Booking ================
 
                     if ($model?->provider) {
-                        if ($model->booking_partial_payments->isNotEmpty()) {
-                            if ($model['payment_method'] == 'cash_after_service') {
+                        // For child bookings, partial payments are stored against the parent booking ID
+                        $partialPaymentBookingId = $model->parent_booking_id ?? $model->id;
+                        $freshPartialPayments = BookingPartialPayment::where('booking_id', $partialPaymentBookingId)->get();
+
+                        if ($freshPartialPayments->isNotEmpty()) {
+                            // Check if there's a wallet payment
+                            $hasWalletPayment = $freshPartialPayments->where('paid_with', 'wallet')->isNotEmpty();
+
+                            if ($model['payment_method'] == 'cash_after_service' && $hasWalletPayment) {
                                 $booking_partial_payment = new BookingPartialPayment;
                                 $booking_partial_payment->booking_id = $model->id;
                                 $booking_partial_payment->paid_with = 'cash_after_service';
-                                $booking_partial_payment->paid_amount = $model->booking_partial_payments->first()?->due_amount;
+                                $booking_partial_payment->paid_amount = $freshPartialPayments->first()?->due_amount;
+                                $booking_partial_payment->due_amount = 0;
+                                $booking_partial_payment->save();
+
+                                completeBookingTransactionForPartialCas($model);
+                            } elseif ($model['payment_method'] == 'cash_after_service') {
+                                $booking_partial_payment = new BookingPartialPayment;
+                                $booking_partial_payment->booking_id = $model->id;
+                                $booking_partial_payment->paid_with = 'cash_after_service';
+                                $booking_partial_payment->paid_amount = $freshPartialPayments->first()?->due_amount;
                                 $booking_partial_payment->due_amount = 0;
                                 $booking_partial_payment->save();
 

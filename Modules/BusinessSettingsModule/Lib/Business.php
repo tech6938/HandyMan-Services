@@ -4,6 +4,7 @@ use Illuminate\Support\Str;
 use Modules\BusinessSettingsModule\Entities\BusinessSettings;
 use Modules\BusinessSettingsModule\Entities\DataSetting;
 use Modules\BusinessSettingsModule\Entities\LoginSetup;
+use Modules\BookingModule\Entities\Booking;
 use Modules\ProviderManagement\Entities\ProviderSetting;
 use Modules\UserManagement\Entities\User;
 
@@ -140,16 +141,64 @@ if (!function_exists('with_decimal_point')) {
     }
 }
 
+// *** OLD REFERRAL CODE GENERATION LOGIC - COMMENTED OUT ***
+// if (!function_exists('generate_referer_code')) {
+//     function generate_referer_code()
+//     {
+//         $ref_code = strtoupper(Str::random(10));
+//
+//         if (User::where('ref_code', '=', $ref_code)->exists()) {
+//             return generate_referer_code();
+//         }
+//
+//         return $ref_code;
+//     }
+// }
+
+/**
+ * Generate new referral code in format: HC + 4 digits (e.g., HC1023)
+ * Used for newly created customers
+ * Ensures uniqueness by regenerating if code already exists
+ */
 if (!function_exists('generate_referer_code')) {
     function generate_referer_code()
     {
-        $ref_code = strtoupper(Str::random(10));
+        // Generate random 4-digit number
+        $randomDigits = str_pad(rand(0, 9999), 4, '0', STR_PAD_LEFT);
+        $ref_code = 'HC' . $randomDigits;
 
+        // Check if this code already exists
         if (User::where('ref_code', '=', $ref_code)->exists()) {
+            // Recursively generate a new code if it exists
             return generate_referer_code();
         }
 
         return $ref_code;
+    }
+}
+
+/**
+ * Generate readable booking ID in format: HC + incrementing number
+ * Examples: HC101, HC102, HC103, etc.
+ * Auto-increments based on the latest booking's readable_id
+ */
+if (!function_exists('generate_booking_readable_id')) {
+    function generate_booking_readable_id()
+    {
+        // Get the maximum readable_id from existing bookings
+        $latestBooking = Booking::orderByRaw('CAST(SUBSTR(readable_id, 3) AS UNSIGNED) DESC')
+            ->first(['readable_id']);
+
+        if ($latestBooking && $latestBooking->readable_id) {
+            // Extract numeric part from readable_id (e.g., "HC101" -> 101)
+            $numericPart = (int) substr($latestBooking->readable_id, 2);
+            $nextNumber = $numericPart + 1;
+        } else {
+            // If no readable_id exists, start from 101
+            $nextNumber = 101;
+        }
+
+        return 'HC' . $nextNumber;
     }
 }
 

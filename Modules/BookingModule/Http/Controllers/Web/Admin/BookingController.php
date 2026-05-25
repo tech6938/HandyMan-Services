@@ -404,19 +404,19 @@ class BookingController extends Controller
                     $query->whereDate('created_at', Carbon::parse($request['start_date'])->startOfDay());
                 } else {
                     $query->whereBetween('created_at', [Carbon::parse($request['start_date'])->startOfDay(), Carbon::parse($request['end_date'])->endOfDay()]);
-                    }
-                    })->when($request->has('sub_category_ids'), function ($query) use ($request) {
-                        $query->whereIn('sub_category_id', $request['sub_category_ids']);
-                        })->when($request->has('category_ids'), function ($query) use ($request) {
+                }
+            })->when($request->has('sub_category_ids'), function ($query) use ($request) {
+                $query->whereIn('sub_category_id', $request['sub_category_ids']);
+            })->when($request->has('category_ids'), function ($query) use ($request) {
                 $query->whereIn('category_id', $request['category_ids']);
             })
             ->latest()->paginate(pagination_limit())->appends($queryParams);
 
-            $zones = $this->zone->select('id', 'name')->withoutGlobalScope('translate')->get();
-            $categories = $this->category->select('id', 'parent_id', 'name')->where('position', 1)->get();
-            $subCategories = $this->category->select('id', 'parent_id', 'name')->where('position', 2)->get();
+        $zones = $this->zone->select('id', 'name')->withoutGlobalScope('translate')->get();
+        $categories = $this->category->select('id', 'parent_id', 'name')->where('position', 1)->get();
+        $subCategories = $this->category->select('id', 'parent_id', 'name')->where('position', 2)->get();
 
-            return view('bookingmodule::admin.booking.offline-payment-list', compact('bookings', 'zones', 'categories', 'subCategories', 'queryParams', 'filterCounter'));
+        return view('bookingmodule::admin.booking.offline-payment-list', compact('bookings', 'zones', 'categories', 'subCategories', 'queryParams', 'filterCounter'));
     }
 
     /**
@@ -425,38 +425,41 @@ class BookingController extends Controller
      * @param Request $request
      * @return Renderable|RedirectResponse
      * @throws AuthorizationException
-    */
+     */
     public function details($id, Request $request): Renderable|RedirectResponse
     {
         $this->authorize('booking_view');
         Validator::make($request->all(), [
             'web_page' => 'required|in:details,status',
-            ]);
-            $webPage = $request->has('web_page') ? $request['web_page'] : 'business_setup';
+        ]);
+        $webPage = $request->has('web_page') ? $request['web_page'] : 'business_setup';
 
-            if ($request->web_page == 'details') {
+        if ($request->web_page == 'details') {
 
-                $booking = $this->booking->with(['detail.service' => function ($query) {
-                    $query->withTrashed();
-                    }, 'detail.service.category', 'detail.service.subCategory', 'detail.variation', 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user'])->find($id);
+            $booking = $this->booking->with(['detail.service' => function ($query) {
+                $query->withTrashed();
+            }, 'detail.service.category', 'detail.service.subCategory', 'detail.variation', 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user', 'parentBooking.booking_partial_payments'])->find($id);
 
-                    $servicemen = $this->serviceman->with(['user'])
-                    ->where('provider_id', $booking?->provider_id)
-                    ->whereHas('user', function ($query) {
+            $servicemen = $this->serviceman->with(['user'])
+                ->where('provider_id', $booking?->provider_id)
+                ->whereHas('user', function ($query) {
                     $query->ofStatus(1);
                 })
                 ->latest()
                 ->get();
+            if ($booking?->parent_booking_id) {
+                $booking->setRelation('booking_partial_payments', $booking->parentBooking->booking_partial_payments ?? collect());
+            }
 
-                $category = $booking?->detail?->first()?->service?->category;
-                $subCategory = $booking?->detail?->first()?->service?->subCategory;
-                $services = collect();
-                if ($category?->id && $subCategory?->id) {
-                    $services = Service::select('id', 'name')
-                        ->where('category_id', $category->id)
-                        ->where('sub_category_id', $subCategory->id)
-                        ->get();
-                }
+            $category = $booking?->detail?->first()?->service?->category;
+            $subCategory = $booking?->detail?->first()?->service?->subCategory;
+            $services = collect();
+            if ($category?->id && $subCategory?->id) {
+                $services = Service::select('id', 'name')
+                    ->where('category_id', $category->id)
+                    ->where('sub_category_id', $subCategory->id)
+                    ->get();
+            }
 
             $customerAddress = $this->userAddress->find($booking?->service_address_id);
             $zones = Zone::ofStatus(1)->withoutGlobalScope('translate')->get();
@@ -505,7 +508,7 @@ class BookingController extends Controller
 
             return view('bookingmodule::admin.booking.details', compact('zoneCenter', 'currentZone', 'centerLat', 'centerLng', 'area', 'booking', 'servicemen', 'webPage', 'customerAddress', 'services', 'zones', 'category', 'subCategory', 'providers', 'sort_by'));
         } elseif ($request->web_page == 'status') {
-            $booking = $this->booking->with(['detail.service', 'customer', 'provider', 'service_address', 'serviceman.user', 'service_address', 'status_histories.user'])->find($id);
+            $booking = $this->booking->with(['detail.service', 'customer', 'provider', 'service_address', 'serviceman.user', 'service_address', 'status_histories.user', 'parentBooking.booking_partial_payments'])->find($id);
             $servicemen = $this->serviceman->with(['user'])
                 ->where('provider_id', $booking?->provider_id)
                 ->whereHas('user', function ($query) {
@@ -567,10 +570,23 @@ class BookingController extends Controller
         ]);
         $webPage = $request->has('web_page') ? $request['web_page'] : 'business_setup';
 
-        $booking = $this->booking->with(['repeat.detail.service','repeat.scheduleHistories','repeat.repeatHistories', 'detail.service' => function ($query) {
-            $query->withTrashed();
-        }, 'detail.service.category', 'detail.service.subCategory', 'detail.variation', 'customer', 'provider',
-            'service_address', 'serviceman', 'service_address', 'status_histories.user'])->find($id);
+        $booking = $this->booking->with([
+            'repeat.detail.service',
+            'repeat.scheduleHistories',
+            'repeat.repeatHistories',
+            'detail.service' => function ($query) {
+                $query->withTrashed();
+            },
+            'detail.service.category',
+            'detail.service.subCategory',
+            'detail.variation',
+            'customer',
+            'provider',
+            'service_address',
+            'serviceman',
+            'service_address',
+            'status_histories.user'
+        ])->find($id);
 
         $servicemen = $this->serviceman->with(['user'])
             ->where('provider_id', $booking?->provider_id)
@@ -713,10 +729,8 @@ class BookingController extends Controller
 
         if ($webPage == 'details') {
             return view('bookingmodule::admin.booking.repeat-booking-details', compact('zoneCenter', 'currentZone', 'centerLat', 'centerLng', 'area', 'booking', 'servicemen', 'webPage', 'customerAddress', 'services', 'zones', 'category', 'subCategory', 'providers', 'sort_by'));
-
-        }elseif ($webPage == 'service_log'){
+        } elseif ($webPage == 'service_log') {
             return view('bookingmodule::admin.booking.service-log', compact('zoneCenter', 'currentZone', 'centerLat', 'centerLng', 'area', 'booking', 'servicemen', 'webPage', 'customerAddress', 'services', 'zones', 'category', 'subCategory', 'providers', 'sort_by'));
-
         }
 
         Toastr::success(translate(ACCESS_DENIED['message']));
@@ -739,76 +753,75 @@ class BookingController extends Controller
         $webPage = $request->has('web_page') ? $request['web_page'] : 'business_setup';
 
 
-            $booking = $this->bookingRepeat->with(['booking', 'detail.service' => function ($query) {
-                $query->withTrashed();
-            }, 'detail.service', 'scheduleHistories.user', 'statusHistories.user', 'booking.service_address', 'booking.customer', 'booking.provider', 'serviceman.user'])->find($id);
+        $booking = $this->bookingRepeat->with(['booking', 'detail.service' => function ($query) {
+            $query->withTrashed();
+        }, 'detail.service', 'scheduleHistories.user', 'statusHistories.user', 'booking.service_address', 'booking.customer', 'booking.provider', 'serviceman.user'])->find($id);
 
-            $servicemen = $this->serviceman->with(['user'])
-                ->where('provider_id', $booking?->provider_id)
-                ->whereHas('user', function ($query) {
-                    $query->ofStatus(1);
-                })
-                ->latest()
+        $servicemen = $this->serviceman->with(['user'])
+            ->where('provider_id', $booking?->provider_id)
+            ->whereHas('user', function ($query) {
+                $query->ofStatus(1);
+            })
+            ->latest()
+            ->get();
+
+        $category = $booking?->detail?->first()?->service?->category;
+        $subCategory = $booking?->detail?->first()?->service?->subCategory;
+        $services = collect();
+        if ($category?->id && $subCategory?->id) {
+            $services = Service::select('id', 'name')
+                ->where('category_id', $category->id)
+                ->where('sub_category_id', $subCategory->id)
                 ->get();
+        }
 
-            $category = $booking?->detail?->first()?->service?->category;
-            $subCategory = $booking?->detail?->first()?->service?->subCategory;
-            $services = collect();
-            if ($category?->id && $subCategory?->id) {
-                $services = Service::select('id', 'name')
-                    ->where('category_id', $category->id)
-                    ->where('sub_category_id', $subCategory->id)
-                    ->get();
-            }
+        $customerAddress = $this->userAddress->find($booking?->service_address_id);
+        $zones = Zone::ofStatus(1)->withoutGlobalScope('translate')->get();
 
-            $customerAddress = $this->userAddress->find($booking?->service_address_id);
-            $zones = Zone::ofStatus(1)->withoutGlobalScope('translate')->get();
+        $providers = $this->provider
+            ->when($request->has('search'), function ($query) use ($request) {
+                $keys = explode(' ', $request['search']);
+                return $query->where(function ($query) use ($keys) {
+                    foreach ($keys as $key) {
+                        $query->orWhere('company_phone', 'LIKE', '%' . $key . '%')
+                            ->orWhere('company_email', 'LIKE', '%' . $key . '%')
+                            ->orWhere('company_name', 'LIKE', '%' . $key . '%');
+                    }
+                });
+            })
+            ->when(isset($booking->booking->sub_category_id), function ($query) use ($request, $booking) {
+                $query->whereHas('subscribed_services', function ($query) use ($request, $booking) {
+                    $query->where('sub_category_id', $booking->booking->sub_category_id)->where('is_subscribed', 1);
+                });
+            })
+            ->where('zone_id', $booking->booking->zone_id)
+            ->withCount('bookings', 'reviews')
+            ->when(business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values, function ($query) {
+                $query->where('is_suspended', 0);
+            })
+            ->where('service_availability', 1)
+            ->withCount('reviews')
+            ->ofApproval(1)->ofStatus(1)->get();
 
-            $providers = $this->provider
-                ->when($request->has('search'), function ($query) use ($request) {
-                    $keys = explode(' ', $request['search']);
-                    return $query->where(function ($query) use ($keys) {
-                        foreach ($keys as $key) {
-                            $query->orWhere('company_phone', 'LIKE', '%' . $key . '%')
-                                ->orWhere('company_email', 'LIKE', '%' . $key . '%')
-                                ->orWhere('company_name', 'LIKE', '%' . $key . '%');
-                        }
-                    });
-                })
-                ->when(isset($booking->booking->sub_category_id), function ($query) use ($request, $booking) {
-                    $query->whereHas('subscribed_services', function ($query) use ($request, $booking) {
-                        $query->where('sub_category_id', $booking->booking->sub_category_id)->where('is_subscribed', 1);
-                    });
-                })
-                ->where('zone_id', $booking->booking->zone_id)
-                ->withCount('bookings', 'reviews')
-                ->when(business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values, function ($query) {
-                    $query->where('is_suspended', 0);
-                })
-                ->where('service_availability', 1)
-                ->withCount('reviews')
-                ->ofApproval(1)->ofStatus(1)->get();
+        $sort_by = 'default';
+        $id = "325778a8-53bd-4de5-a6bb-826f62edf603";
+        $zoneCenter = Zone::selectRaw("*,ST_AsText(ST_Centroid(`coordinates`)) as center")->withoutGlobalScope('translate')->find($id);
 
-            $sort_by = 'default';
-            $id = "325778a8-53bd-4de5-a6bb-826f62edf603";
-            $zoneCenter = Zone::selectRaw("*,ST_AsText(ST_Centroid(`coordinates`)) as center")->withoutGlobalScope('translate')->find($id);
+        $currentZone = [];
+        $centerLat = [];
+        $centerLng = [];
+        $area = [];
 
-            $currentZone = [];
-            $centerLat = [];
-            $centerLng = [];
-            $area = [];
+        if (isset($zoneCenter)) {
+            $currentZone = format_coordinates(json_decode($zoneCenter->coordinates[0]->toJson(), true));
+            $centerLat = trim(explode(' ', $zoneCenter->center)[1], 'POINT()');
+            $centerLng = trim(explode(' ', $zoneCenter->center)[0], 'POINT()');
 
-            if (isset($zoneCenter)) {
-                $currentZone = format_coordinates(json_decode($zoneCenter->coordinates[0]->toJson(), true));
-                $centerLat = trim(explode(' ', $zoneCenter->center)[1], 'POINT()');
-                $centerLng = trim(explode(' ', $zoneCenter->center)[0], 'POINT()');
-
-                $area = json_decode($zoneCenter->coordinates[0]->toJson(), true);
-            }
+            $area = json_decode($zoneCenter->coordinates[0]->toJson(), true);
+        }
         if ($request->web_page == 'details') {
             return view('bookingmodule::admin.booking.rebooking-ongoing', compact('zoneCenter', 'currentZone', 'centerLat', 'centerLng', 'area', 'booking', 'servicemen', 'webPage', 'customerAddress', 'services', 'zones', 'category', 'subCategory', 'providers', 'sort_by'));
-
-        }elseif ($request->web_page == 'status') {
+        } elseif ($request->web_page == 'status') {
             return view('bookingmodule::admin.booking.repeat-status', compact('booking', 'webPage', 'servicemen', 'customerAddress', 'category', 'subCategory', 'services', 'providers', 'zones', 'sort_by'));
         }
     }
@@ -832,7 +845,7 @@ class BookingController extends Controller
         $repeatBooking = $this->bookingRepeat->find($bookingId);
 
         if ($booking) {
-            if($booking->booking_status == 'ongoing' && $request['booking_status'] == 'canceled'){
+            if ($booking->booking_status == 'ongoing' && $request['booking_status'] == 'canceled') {
                 return response()->json(BOOKING_ALREADY_ONGOING, 200);
             }
             return $this->updateBookingStatus($booking, $validated['booking_status'], $request);
@@ -881,7 +894,7 @@ class BookingController extends Controller
     {
         $repeatBooking->booking_status = $status;
 
-        if ($status == 'canceled' && $repeatBooking->extra_fee > 0){
+        if ($status == 'canceled' && $repeatBooking->extra_fee > 0) {
 
             $booking = $this->booking->where('id', $repeatBooking->booking_id)->first();
             $sortedRepeats = $booking->repeat->sortBy(function ($repeat) {
@@ -975,7 +988,7 @@ class BookingController extends Controller
         ]);
 
         $repeatBooking = $this->bookingRepeat->where('id', $bookingId)->first();
-        if (isset($repeatBooking)){
+        if (isset($repeatBooking)) {
             $repeatBooking->booking_status = $request['booking_status'];
 
             $bookingStatusHistory = $this->bookingStatusHistory;
@@ -1499,7 +1512,7 @@ class BookingController extends Controller
     {
         $booking = $this->booking->with(['detail.service' => function ($query) {
             $query->withTrashed();
-        }, 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user','repeat'])->find($id);
+        }, 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user', 'repeat'])->find($id);
 
         return view('bookingmodule::admin.booking.fullbooking-invoice', compact('booking'));
     }
@@ -1530,7 +1543,7 @@ class BookingController extends Controller
         App::setLocale($lang);
         $booking = $this->booking->with(['detail.service' => function ($query) {
             $query->withTrashed();
-        }, 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user','repeat'])->find($id);
+        }, 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user', 'repeat'])->find($id);
 
         return view('bookingmodule::admin.booking.fullbooking-invoice', compact('booking'));
     }
@@ -1562,7 +1575,7 @@ class BookingController extends Controller
         App::setLocale($lang);
         $booking = $this->booking->with(['detail.service' => function ($query) {
             $query->withTrashed();
-        }, 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user','repeat'])->find($id);
+        }, 'customer', 'provider', 'service_address', 'serviceman', 'service_address', 'status_histories.user', 'repeat'])->find($id);
 
         return view('bookingmodule::admin.booking.fullbooking-invoice', compact('booking'));
     }
@@ -1882,7 +1895,7 @@ class BookingController extends Controller
             }
         }
 
-        if ($request['next_all_booking_change'] == 1){
+        if ($request['next_all_booking_change'] == 1) {
             $mainBooking = $this->booking->where('id', $request['booking_id'])->first();
             $sourceRepeatBooking = $this->bookingRepeat->where('id', $request['booking_repeat_id'])->first();
             $serviceFee = 0;
@@ -1980,8 +1993,7 @@ class BookingController extends Controller
             $mainBooking->total_discount_amount = $targetRepeatBookings->sum('total_discount_amount') + $sourceRepeatBooking->total_discount_amount;
             $mainBooking->total_campaign_discount_amount = $targetRepeatBookings->sum('total_campaign_discount_amount') + $sourceRepeatBooking->total_campaign_discount_amount;
             $mainBooking->save();
-
-        }else{
+        } else {
             $mainBooking = $this->booking->where('id', $request['booking_id'])->first();
             $sourceRepeatBooking = $this->bookingRepeat->where('id', $request['booking_repeat_id'])->first();
             $repeatBooking = $this->bookingRepeat->where('booking_id', $request['booking_id'])->get();

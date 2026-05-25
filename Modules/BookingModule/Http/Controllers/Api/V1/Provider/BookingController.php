@@ -835,6 +835,7 @@ class BookingController extends Controller
      * @return JsonResponse
      */
 
+
     public function statusUpdate(Request $request, string $bookingId): JsonResponse
     {
         $validator = Validator::make($request->all(), [

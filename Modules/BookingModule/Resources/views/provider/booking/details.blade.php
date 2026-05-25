@@ -258,21 +258,28 @@
                                                 @endforeach
                                             @endif
 
-                                            <?php
-                                            $dueAmount = 0;
-
-                                            if (!$booking->is_paid && $booking?->booking_partial_payments?->count() == 1) {
-                                                $dueAmount = $booking->booking_partial_payments->first()?->due_amount;
-                                            }
-
-                                            if (in_array($booking->booking_status, ['pending', 'accepted', 'ongoing']) && $booking->payment_method != 'cash_after_service' && $booking->additional_charge > 0) {
-                                                $dueAmount += $booking->additional_charge;
-                                            }
-
-                                            if (!$booking->is_paid && $booking->payment_method == 'cash_after_service') {
+                                             <?php
                                                 $dueAmount = $booking->total_booking_amount;
-                                            }
-                                            ?>
+
+                                                $partialPayments = $booking->booking_partial_payments;
+
+                                                if ($partialPayments->isEmpty() && $booking->parentBooking) {
+                                                    $partialPayments = $booking->parentBooking->booking_partial_payments;
+                                                }
+
+                                                if ($partialPayments->isNotEmpty()) {
+                                                    $totalPaid = $partialPayments->sum('paid_amount');
+                                                    $dueAmount -= $totalPaid;
+                                                }
+
+                                                if (in_array($booking->booking_status, ['pending', 'accepted', 'ongoing']) && $booking->payment_method != 'cash_after_service' && $booking->additional_charge > 0) {
+                                                    $dueAmount += $booking->additional_charge;
+                                                }
+
+                                                if ($dueAmount < 0) {
+                                                    $dueAmount = 0;
+                                                }
+                                                ?>
 
                                             @if($dueAmount > 0)
                                                 <tr>

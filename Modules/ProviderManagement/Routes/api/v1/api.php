@@ -8,6 +8,7 @@ use Modules\ProviderManagement\Http\Controllers\Api\V1\Provider\Report\BookingRe
 use Modules\ProviderManagement\Http\Controllers\Api\V1\Provider\Report\BusinessReportController;
 use Modules\ProviderManagement\Http\Controllers\Api\V1\Provider\Report\TransactionReportController;
 use Modules\ProviderManagement\Http\Controllers\Api\V1\Provider\TimeScheduleController;
+use Modules\ProviderManagement\Http\Controllers\Api\V1\Provider\WithdrawController;
 
 /*
 |--------------------------------------------------------------------------
@@ -61,7 +62,20 @@ Route::group(['prefix' => 'provider', 'as' => 'provider.', 'namespace' => 'Api\V
         Route::get('commission-info', 'AccountController@commissionInfo');
     });
 
-    Route::resource('withdraw', 'WithdrawController', ['only' => ['index', 'store']]);
+    //    Route::resource('withdraw', 'WithdrawController', ['only' => ['index', 'store']]);
+    Route::get('/withdraw', [WithdrawController::class, 'index']);
+    Route::post('/withdraw', [WithdrawController::class, 'store']);
+
+    Route::group(['prefix' => 'payment-information', 'as' => 'payment-information.'], function () {
+        Route::get('index', [WithdrawController::class, 'paymentInformationIndex'])->name('index');
+        Route::post('store', [WithdrawController::class, 'paymentInformationStore'])->name('store');
+        Route::get('edit/{id}', [WithdrawController::class, 'paymentInformationEdit'])->name('edit');
+        Route::post('update/{id}', [WithdrawController::class, 'paymentInformationUpdate'])->name('update');
+        Route::get('status-update/{id}', [WithdrawController::class, 'paymentInformationStatusUpdate'])->name('status-update');
+        Route::get('default-status-update/{id}', [WithdrawController::class, 'paymentInformationDefaultStatusUpdate'])->name('default-status-update');
+        Route::delete('delete/{id}', [WithdrawController::class, 'paymentInformationDelete'])->name('delete');
+    });
+
     Route::get('review', 'ProviderController@review');
 
     Route::get('available-time-schedule', [TimeScheduleController::class, 'getAvailableTimeSchedule']);

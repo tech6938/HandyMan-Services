@@ -355,7 +355,7 @@
                                     <tbody>
                                         @php($subTotal = 0)
                                         @foreach ($booking->detail as $detail)
-                                        {{-- @dd($detail->service) --}}
+                                            {{-- @dd($detail->service) --}}
                                             <tr>
                                                 <td class="text-wrap ps-lg-3">
                                                     @if (isset($detail->service))
@@ -412,7 +412,8 @@
                                                 <tr>
                                                     <td class="text-capitalize">{{ translate('service_discount') }}</td>
                                                     <td class="text--end pe--4">
-                                                        {{ with_currency_symbol($booking->total_discount_amount) }}</td>
+                                                        {{ with_currency_symbol($booking->total_discount_amount) }}
+                                                    </td>
                                                 </tr>
                                                 <tr>
                                                     <td class="text-capitalize">{{ translate('coupon_discount') }}</td>
@@ -435,7 +436,8 @@
                                                 <tr>
                                                     <td class="text-capitalize">{{ translate('vat_/_tax') }}</td>
                                                     <td class="text--end pe--4">
-                                                        {{ with_currency_symbol($booking->total_tax_amount) }}</td>
+                                                        {{ with_currency_symbol($booking->total_tax_amount) }}
+                                                    </td>
                                                 </tr>
                                                 @if ($booking->extra_fee > 0)
                                                     @php($additional_charge_label_name = business_config('additional_charge_label_name', 'booking_setup')->live_values ?? 'Fee')
@@ -443,7 +445,8 @@
                                                         <td class="text-capitalize">{{ $additional_charge_label_name }}
                                                         </td>
                                                         <td class="text--end pe--4">
-                                                            {{ with_currency_symbol($booking->extra_fee) }}</td>
+                                                            {{ with_currency_symbol($booking->extra_fee) }}
+                                                        </td>
                                                     </tr>
                                                 @endif
 
@@ -453,39 +456,61 @@
                                                         <strong>{{ with_currency_symbol($booking->total_booking_amount) }}</strong>
                                                     </td>
                                                 </tr>
-
+                                                {{-- @dd($booking->is_paid) --}}
                                                 @if ($booking->booking_partial_payments->isNotEmpty())
                                                     @foreach ($booking->booking_partial_payments as $partial)
                                                         <tr>
                                                             <td>{{ translate('Paid_by') }}
-                                                                {{ str_replace('_', ' ', $partial->paid_with) }}</td>
+                                                                {{ str_replace('_', ' ', $partial->paid_with) }}
+                                                                @if ($partial->paid_with == 'wallet')
+                                                                    ({{ translate('Wallet') }})
+                                                                @endif
+                                                            </td>
                                                             <td class="text--end pe--4">
-                                                                {{ with_currency_symbol($partial->paid_amount) }}</td>
+                                                                -{{ with_currency_symbol($partial->paid_amount) }}
+                                                            </td>
                                                         </tr>
                                                     @endforeach
                                                 @endif
 
                                                 <?php
-                                                $dueAmount = 0;
+                                                $dueAmount = $booking->total_booking_amount;
 
-                                                if (!$booking->is_paid && $booking?->booking_partial_payments?->count() == 1) {
-                                                    $dueAmount = $booking->booking_partial_payments->first()?->due_amount;
+                                                $partialPayments = $booking->booking_partial_payments;
+
+                                                if ($partialPayments->isEmpty() && $booking->parentBooking) {
+                                                    $partialPayments = $booking->parentBooking->booking_partial_payments;
+                                                }
+
+                                                if ($partialPayments->isNotEmpty()) {
+                                                    $totalPaid = $partialPayments->sum('paid_amount');
+                                                    $dueAmount -= $totalPaid;
                                                 }
 
                                                 if (in_array($booking->booking_status, ['pending', 'accepted', 'ongoing']) && $booking->payment_method != 'cash_after_service' && $booking->additional_charge > 0) {
                                                     $dueAmount += $booking->additional_charge;
                                                 }
 
-                                                if (!$booking->is_paid && $booking->payment_method == 'cash_after_service') {
-                                                    $dueAmount = $booking->total_booking_amount;
+                                                if ($dueAmount < 0) {
+                                                    $dueAmount = 0;
                                                 }
                                                 ?>
 
                                                 @if ($dueAmount > 0)
                                                     <tr>
-                                                        <td>{{ translate('Due_Amount') }}</td>
+                                                        <td><strong>{{ translate('Due_Amount') }}</strong></td>
                                                         <td class="text--end pe--4">
-                                                            {{ with_currency_symbol($dueAmount) }}</td>
+                                                            <strong
+                                                                class="text-danger">{{ with_currency_symbol($dueAmount) }}</strong>
+                                                        </td>
+                                                    </tr>
+                                                @elseif($dueAmount == 0 && $partialPayments->sum('paid_amount') > 0)
+                                                    <tr>
+                                                        <td><strong>{{ translate('Due_Amount') }}</strong></td>
+                                                        <td class="text--end pe--4">
+                                                            <strong
+                                                                class="text-success">{{ with_currency_symbol(0) }}</strong>
+                                                        </td>
                                                     </tr>
                                                 @endif
 
