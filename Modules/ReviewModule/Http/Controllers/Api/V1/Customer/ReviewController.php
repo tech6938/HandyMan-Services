@@ -115,6 +115,7 @@ class ReviewController extends Controller
         $validator = Validator::make($request->all(), [
             'booking_id' => 'required|uuid',
             'service_id' => 'required|uuid',
+            'variant_id' => 'required',
             'review_rating' => 'required|numeric|min:1|max:5',
             'review_comment' => 'nullable',
             'review_images' => 'image',
@@ -168,6 +169,7 @@ class ReviewController extends Controller
         $review = $this->review
             ->where('booking_id', $request->booking_id)
             ->where('service_id', $request->service_id)
+            ->where('variant_id', $request->variant_id)
             ->where('customer_id', $request->user()->id)
             ->first();
 
@@ -177,6 +179,7 @@ class ReviewController extends Controller
 
         $review->booking_id = $request->booking_id;
         $review->service_id = $request->service_id;
+        $review->variant_id = $request->variant_id;
         $review->customer_id = $request->user()->id;
         $review->review_rating = $request->review_rating;
         $review->review_comment = $request->review_comment;

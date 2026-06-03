@@ -769,26 +769,51 @@ class ServiceController extends Controller
 
     private function variationMapper($services)
     {
-        $services->map(function ($service) {
-            $service['variations_app_format'] = self::variationsAppFormat($service);
+        $serviceIds = $services->pluck('id')->toArray();
+        $variantRatingMap = Review::whereIn('service_id', $serviceIds)
+            ->select(
+                'service_id',
+                'variant_id',
+                DB::raw('AVG(review_rating) as average_rating'),
+                DB::raw('COUNT(*) as review_count')
+            )
+            ->groupBy('service_id', 'variant_id')
+            ->get()
+            ->groupBy('service_id')
+            ->map(function ($group) {
+                return $group->keyBy('variant_id')->map(function ($item) {
+                    return [
+                        'average_rating' => round($item->average_rating, 2),
+                        'review_count' => (int) $item->review_count,
+                    ];
+                });
+            });
+
+        $services->map(function ($service) use ($variantRatingMap) {
+            $variantRatings = $variantRatingMap->has($service->id) ? $variantRatingMap->get($service->id) : collect();
+            $service['variations_app_format'] = self::variationsAppFormat($service, $variantRatings);
             return $service;
         });
         return $services;
     }
 
-    private function variationsAppFormat($service): array
+    private function variationsAppFormat($service, $variantRatings = null): array
     {
+        $variantRatings = $variantRatings ?? collect();
         $formatting = [];
         $filtered = $service['variations']->where('zone_id', Config::get('zone_id'));
         $formatting['zone_id'] = Config::get('zone_id');
         $formatting['default_price'] = $filtered->first() ? $filtered->first()->price : 0;
         $formatting['default_service_img'] = $filtered->first() ? $filtered->first()->service_img_full_path : null;
         foreach ($filtered as $data) {
+            $variantRating = $variantRatings->has($data->id) ? $variantRatings->get($data->id) : ['average_rating' => 0, 'review_count' => 0];
             $formatting['zone_wise_variations'][] = [
                 'variant_key' => $data['variant_key'],
                 'variant_name' => $data['variant'],
                 'price' => $data['price'],
                 'service_img' => $data['service_img_full_path'],
+                'variant_avg_rating' => $variantRating['average_rating'],
+                'variant_review_count' => $variantRating['review_count'],
             ];
         }
         return $formatting;
@@ -850,7 +875,34 @@ class ServiceController extends Controller
                 $recentView->save();
             }
 
-            $service['variations_app_format'] = self::variationsAppFormat($service);
+            // Aggregate reviews per variant for this service
+            $variantAggregates = Review::where('service_id', $service->id)
+                ->where('is_active', 1)
+                ->select(
+                    'variant_id',
+                    DB::raw('AVG(review_rating) as average_rating'),
+                    DB::raw('COUNT(*) as review_count')
+                )
+                ->groupBy('variant_id')
+                ->get()
+                ->keyBy('variant_id')
+                ->map(function ($item) {
+                    return [
+                        'average_rating' => round($item->average_rating, 2),
+                        'review_count' => (int) $item->review_count,
+                    ];
+                });
+
+            // Compute overall average and total reviews for the service
+            $overall = Review::where('service_id', $service->id)
+                ->where('is_active', 1)
+                ->select(DB::raw('AVG(review_rating) as avg'), DB::raw('COUNT(*) as total'))
+                ->first();
+
+            $service['avg_rating'] = ($overall && $overall->avg) ? round($overall->avg, 2) : 0;
+            $service['total_reviews'] = $overall ? (int) $overall->total : 0;
+
+            $service['variations_app_format'] = self::variationsAppFormat($service, $variantAggregates);
             return response()->json(response_formatter(DEFAULT_200, $service), 200);
         }
         return response()->json(response_formatter(DEFAULT_204), 200);

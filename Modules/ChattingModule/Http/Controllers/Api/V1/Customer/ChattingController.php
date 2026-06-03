@@ -219,7 +219,8 @@ class ChattingController extends Controller
             'message' => '',
             'channel_id' => 'required|uuid',
             'files' => is_null($request['message']) ? 'required|array' : 'array',
-            'files.*' => 'max:' . uploadMaxFileSizeInKB('file') . '|mimes:' . implode(',', array_column(FILE_TYPE, 'key')),
+            'files.*' => 'max:' . uploadMaxFileSizeInKB('file'),
+            // 'files.*' => 'file|max:' . uploadMaxFileSizeInKB('file') . '|mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,csv,ppt,pptx,txt,zip,rar,7z,mp3,mp4,mov,avi',
         ]);
 
         if ($validator->fails()) {

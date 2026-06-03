@@ -351,6 +351,7 @@ class BookingController extends Controller
             ->whereNull('parent_booking_id')
             ->with([
                 'detail.service',
+                'detail.variation',
                 'schedule_histories.user',
                 'status_histories.user',
                 'service_address',
@@ -424,7 +425,9 @@ class BookingController extends Controller
                     'schedule_histories' => $child->schedule_histories,
                     'services'           => $child->detail->map(fn($d) => [
                         'service_id'      => $d->service_id,
+                        'variant_id'      => $d->variation?->id,
                         'service_name'    => $d->service_name,
+                        'variant_key'     => $d->variant_key,
                         'quantity'        => $d->quantity,
                         'service_cost'    => $d->service_cost,
                         'total_cost'      => $d->total_cost,

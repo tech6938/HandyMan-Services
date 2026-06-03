@@ -803,8 +803,10 @@ if (!function_exists('saveSingleImageDataToStorage')) {
             // Try to determine the path from the model column
             $columnValue = $model->$modelColumn;
             if ($columnValue && $columnValue != 'default.png') {
-                // Determine folder based on model column
+                // Determine folder based on model type and column
                 $folder = '';
+                $modelClass = get_class($model);
+                
                 if ($modelColumn == 'profile_image') {
                     if ($model->user_type == 'provider-serviceman') {
                         $folder = 'serviceman/profile/';
@@ -818,7 +820,12 @@ if (!function_exists('saveSingleImageDataToStorage')) {
                 } elseif ($modelColumn == 'thumbnail') {
                     $folder = 'campaign/';
                 } elseif ($modelColumn == 'cover_image') {
-                    $folder = 'campaign/';
+                    // Check if this is a PushNotification model
+                    if (strpos($modelClass, 'PushNotification') !== false) {
+                        $folder = 'push-notification/';
+                    } else {
+                        $folder = 'campaign/';
+                    }
                 } elseif ($modelColumn == 'logo') {
                     $folder = 'images/provider/logo/';
                 }
