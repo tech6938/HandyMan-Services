@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
-use Log;
+use Illuminate\Support\Facades\Log;
 use Modules\BookingModule\Entities\Booking;
 use Modules\BookingModule\Entities\BookingRepeat;
 use Modules\BookingModule\Entities\BookingStatusHistory;
@@ -806,7 +806,7 @@ if (!function_exists('saveSingleImageDataToStorage')) {
                 // Determine folder based on model type and column
                 $folder = '';
                 $modelClass = get_class($model);
-                
+
                 if ($modelColumn == 'profile_image') {
                     if ($model->user_type == 'provider-serviceman') {
                         $folder = 'serviceman/profile/';

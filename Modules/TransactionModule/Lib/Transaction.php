@@ -814,23 +814,28 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
     //     $provider_earning = (float) $ledgerSnapshot['provider_earning'];
 
     //     // If admin_commission is 0, fetch directly from service_commissions table
-    //     if ($admin_commission == 0 && $booking->detail->isNotEmpty()) {
+    //     $admin_commission = 0;  // Initialize to 0
+    //     if ($booking->detail->isNotEmpty()) {
     //         foreach ($booking->detail as $detail) {
-    //             $serviceCommission = \Modules\ServiceManagement\Entities\ServiceCommission::where('service_id', $detail->service_id)->first();
+    //             $serviceCommission = ServiceCommission::where('service_id', $detail->service_id)->first();
     //             if ($serviceCommission) {
     //                 $commission_value = (float) $serviceCommission->commission;
     //                 $commission_type = $serviceCommission->commission_type;
+    //                 $item_commission = 0;
 
     //                 if ($commission_type == 'percent') {
     //                     $service_cost = (float) $detail->service_cost * (int) $detail->quantity;
-    //                     $admin_commission = ($commission_value / 100) * $service_cost;
+    //                     $item_commission = ($commission_value / 100) * $service_cost;
     //                 } else {
-    //                     $admin_commission = $commission_value;
+    //                     $item_commission = $commission_value;
     //                 }
-    //                 $provider_earning = $total_amount - $admin_commission;
-    //                 break;
+
+    //                 // FIX: Use += to accumulate commission from all variants
+    //                 $admin_commission += $item_commission;
     //             }
     //         }
+    //         // Calculate provider earning after accumulating all commissions
+    //         $provider_earning = $total_amount - $admin_commission;
     //     }
 
     //     // SIMPLE FORMULAS:
@@ -969,6 +974,7 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
     //         ]);
     //     });
     // }
+
     function completeBookingTransactionForPartialCas($booking): void
     {
         // Get partial payment from parent if this is a child booking
@@ -984,20 +990,14 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
         $total_amount = (float) $booking['total_booking_amount'];
         $cash_due = $total_amount - $wallet_paid;
 
-        // Get commission from ledger snapshot
-        $ledgerSnapshot = getBookingLedgerSnapshot($booking);
-        $admin_commission = (float) $ledgerSnapshot['admin_commission'];
-        $provider_earning = (float) $ledgerSnapshot['provider_earning'];
-
-        // If admin_commission is 0, fetch directly from service_commissions table
-        $admin_commission = 0;  // Initialize to 0
+        // Calculate admin commission from services
+        $admin_commission = 0;
         if ($booking->detail->isNotEmpty()) {
             foreach ($booking->detail as $detail) {
                 $serviceCommission = ServiceCommission::where('service_id', $detail->service_id)->first();
                 if ($serviceCommission) {
                     $commission_value = (float) $serviceCommission->commission;
                     $commission_type = $serviceCommission->commission_type;
-                    $item_commission = 0;
 
                     if ($commission_type == 'percent') {
                         $service_cost = (float) $detail->service_cost * (int) $detail->quantity;
@@ -1006,52 +1006,53 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
                         $item_commission = $commission_value;
                     }
 
-                    // FIX: Use += to accumulate commission from all variants
                     $admin_commission += $item_commission;
                 }
             }
-            // Calculate provider earning after accumulating all commissions
-            $provider_earning = $total_amount - $admin_commission;
         }
 
+        // Calculate provider earning
+        $provider_earning = $total_amount - $admin_commission;
+
+        // For mixed payment scenario:
+        // Admin receives the entire wallet amount (₹400)
+        // Provider keeps all cash (₹600)
+        // Provider should receive remaining earnings (₹300) as wallet credit
+
+        $provider_net_earning = $provider_earning; // ₹900
+        $provider_cash_received = $cash_due; // ₹600
+        $provider_wallet_credit = $provider_net_earning - $provider_cash_received; // ₹300
+
+        // Admin commission comes from wallet payment
+        // Account receivable: What provider owes to admin? Actually, provider doesn't owe anything
+        // Instead, admin keeps commission from wallet payment
+
         // SIMPLE FORMULAS:
-        $account_receivable = max(0, $wallet_paid - $admin_commission);
-        $account_payable = $admin_commission;
+        // Admin keeps commission from wallet payment
+        $admin_commission_from_wallet = min($admin_commission, $wallet_paid);
+        $wallet_amount_to_admin = $wallet_paid; // Entire wallet goes to admin
+        $wallet_balance_to_provider = $provider_wallet_credit; // ₹300 to provider's wallet
 
         // user ids
         $admin_user_id = User::where('user_type', ADMIN_USER_TYPES[0])->first()->id;
         $provider_user_id = get_user_id($booking['provider_id'], PROVIDER_USER_TYPES[0]);
 
-        DB::transaction(function () use ($booking, $admin_user_id, $provider_user_id, $wallet_paid, $cash_due, $admin_commission, $provider_earning, $account_receivable, $account_payable) {
+        DB::transaction(function () use ($booking, $admin_user_id, $provider_user_id, $wallet_paid, $cash_due, $admin_commission, $provider_earning, $provider_wallet_credit, $admin_commission_from_wallet, $wallet_amount_to_admin) {
 
             // Get accounts
             $adminAccount = Account::where('user_id', $admin_user_id)->first();
             $providerAccount = Account::where('user_id', $provider_user_id)->first();
 
-            // Log before update
-            \Illuminate\Support\Facades\Log::info('Before update - admin account', [
-                'booking_id' => $booking['id'],
-                'current_account_payable' => $adminAccount->account_payable,
-                'current_received_balance' => $adminAccount->received_balance,
-                'current_balance_pending' => $adminAccount->balance_pending,
-            ]);
+            /** WALLET PAYMENT HANDLING (₹400) */
+            // Admin receives wallet payment
+            $adminAccount->received_balance += $admin_commission_from_wallet; // Admin gets ₹100 commission
+            $adminAccount->balance_pending -= $wallet_paid; // Reduce pending balance by ₹400
 
-            /** DIGITAL/WALLET PORTION */
-            $adminAccount->balance_pending -= $wallet_paid;
-            $adminAccount->received_balance += $admin_commission;
-            $adminAccount->account_payable = ($adminAccount->account_payable ?? 0) + $account_payable; // Using assignment for clarity
+            // Provider receives remaining wallet amount as credit (₹300)
+            $provider_wallet_amount = $provider_wallet_credit; // ₹300
+            $providerAccount->account_receivable += $provider_wallet_amount;
 
-            // Save admin account immediately
-            $adminAccount->save();
-
-            // Log after save to verify
-            \Illuminate\Support\Facades\Log::info('After admin save - verification', [
-                'booking_id' => $booking['id'],
-                'saved_account_payable' => $adminAccount->account_payable,
-                'saved_received_balance' => $adminAccount->received_balance,
-            ]);
-
-            // Admin transaction (-pending)
+            // Create primary transaction for wallet payment
             $primary_transaction = Transaction::create([
                 'ref_trx_id' => null,
                 'booking_id' => $booking['id'],
@@ -1065,14 +1066,14 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
                 'to_user_account' => null
             ]);
 
-            // Admin commission transaction
-            if ($admin_commission > 0) {
+            // Admin commission transaction (₹100)
+            if ($admin_commission_from_wallet > 0) {
                 Transaction::create([
                     'ref_trx_id' => $primary_transaction['id'],
                     'booking_id' => $booking['id'],
                     'trx_type' => TRX_TYPE['received_commission'],
                     'debit' => 0,
-                    'credit' => $admin_commission,
+                    'credit' => $admin_commission_from_wallet,
                     'balance' => $adminAccount->received_balance,
                     'from_user_id' => $admin_user_id,
                     'to_user_id' => $admin_user_id,
@@ -1081,47 +1082,33 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
                 ]);
             }
 
-            // Provider account_receivable and payable
-            $providerAccount->account_receivable += $account_receivable;
-            $providerAccount->account_payable = ($providerAccount->account_payable ?? 0) + $account_payable;
+            // Provider wallet credit transaction (₹300)
+            if ($provider_wallet_amount > 0) {
+                Transaction::create([
+                    'ref_trx_id' => $primary_transaction['id'],
+                    'booking_id' => $booking['id'],
+                    'trx_type' => TRX_TYPE['receivable_amount'],
+                    'debit' => 0,
+                    'credit' => $provider_wallet_amount,
+                    'balance' => $providerAccount->account_receivable,
+                    'from_user_id' => $admin_user_id,
+                    'to_user_id' => $provider_user_id,
+                    'from_user_account' => null,
+                    'to_user_account' => ACCOUNT_STATES[3]['value']
+                ]);
+            }
 
-            Transaction::create([
-                'ref_trx_id' => $primary_transaction['id'],
-                'booking_id' => $booking['id'],
-                'trx_type' => TRX_TYPE['receivable_amount'],
-                'debit' => 0,
-                'credit' => $account_receivable,
-                'balance' => $providerAccount->account_receivable,
-                'from_user_id' => $admin_user_id,
-                'to_user_id' => $provider_user_id,
-                'from_user_account' => null,
-                'to_user_account' => ACCOUNT_STATES[3]['value']
-            ]);
-
-            // Admin payable transaction (commission owed by provider)
-            Transaction::create([
-                'ref_trx_id' => $primary_transaction['id'],
-                'booking_id' => $booking['id'],
-                'trx_type' => TRX_TYPE['payable_amount'],
-                'debit' => 0,
-                'credit' => $account_payable,
-                'balance' => $adminAccount->account_payable,
-                'from_user_id' => $admin_user_id,
-                'to_user_id' => $admin_user_id,
-                'from_user_account' => ACCOUNT_STATES[2]['value'],
-                'to_user_account' => null
-            ]);
-
-            /** CASH PORTION */
+            /** CASH PORTION HANDLING (₹600) */
             if ($cash_due > 0) {
-                $providerAccount->received_balance += $provider_earning;
+                // Cash goes directly to provider as received amount
+                $providerAccount->received_balance += $cash_due; // Provider gets ₹600 cash
 
                 Transaction::create([
                     'ref_trx_id' => $primary_transaction['id'],
                     'booking_id' => $booking['id'],
                     'trx_type' => TRX_TYPE['received_amount'],
                     'debit' => 0,
-                    'credit' => $provider_earning,
+                    'credit' => $cash_due,
                     'balance' => $providerAccount->received_balance,
                     'from_user_id' => $provider_user_id,
                     'to_user_id' => $provider_user_id,
@@ -1130,24 +1117,24 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
                 ]);
             }
 
+            // Save both accounts
+            $adminAccount->save();
             $providerAccount->save();
 
-            // Final verification from database
-            $finalAdminAccount = Account::where('user_id', $admin_user_id)->first();
-
-            \Illuminate\Support\Facades\Log::info('Partial CAS Transaction Completed', [
-                'booking_id' => $booking['id'],
-                'wallet_paid' => $wallet_paid,
-                'cash_due' => $cash_due,
-                'admin_commission' => $admin_commission,
-                'account_receivable' => $account_receivable,
-                'account_payable' => $account_payable,
-                'admin_received_balance' => $adminAccount->received_balance,
-                'admin_payable' => $adminAccount->account_payable,
-                'FINAL_DB_account_payable' => $finalAdminAccount->account_payable,
-                'provider_account_receivable' => $providerAccount->account_receivable,
-                'provider_received_balance' => $providerAccount->received_balance,
-            ]);
+            // Log the transaction
+            // \Illuminate\Support\Facades\Log::info('Partial CAS Transaction Completed - Mixed Payment', [
+            //     'booking_id' => $booking['id'],
+            //     'total_amount' => $booking['total_booking_amount'],
+            //     'wallet_paid' => $wallet_paid,
+            //     'cash_paid' => $cash_due,
+            //     'admin_commission' => $admin_commission_from_wallet,
+            //     'provider_cash_received' => $cash_due,
+            //     'provider_wallet_credit' => $provider_wallet_amount,
+            //     'provider_total_earning' => $provider_earning,
+            //     'admin_received_balance' => $adminAccount->received_balance,
+            //     'provider_received_balance' => $providerAccount->received_balance,
+            //     'provider_account_receivable' => $providerAccount->account_receivable,
+            // ]);
         });
     }
 } //partially paid

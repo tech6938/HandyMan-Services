@@ -86,10 +86,34 @@ if (!function_exists('resolve_notification_image')) {
     }
 }
 
+if (!function_exists('isOrderNotification')) {
+    function isOrderNotification($type, $title = '', $body = '', $bookingId = null, $bookingType = null)
+    {
+        $text = strtolower(trim(($title ?? '') . ' ' . ($body ?? '')));
+
+        return in_array(strtolower((string) $type), ['booking', 'order', 'service_request'], true)
+            || !empty($bookingId)
+            || !empty($bookingType)
+            || str_contains($text, 'booking')
+            || str_contains($text, 'order')
+            || str_contains($text, 'service request')
+            || str_contains($text, 'new service request arrived');
+    }
+}
+
 if (!function_exists('device_notification')) {
     function device_notification($fcm_token, $title, $description, $image, $booking_id, $type = 'status', $channel_id = null, $user_id = null, $data = null, $advertisement_id = null, $bookingType = null, $repeat_type = null)
     {
         // dd($fcm_token, $title, $description, $image, $booking_id, $type = 'status', $channel_id = null, $user_id = null, $data = null, $advertisement_id = null, $bookingType = null, $repeat_type = null);
+        $rawTitle = (string) ($title ?? '');
+        $rawBody = (string) ($description ?? '');
+        $notificationText = strtolower(trim($rawTitle . ' ' . $rawBody));
+
+        $isOrderNotification = isOrderNotification($type, $rawTitle, $rawBody, $booking_id, $bookingType);
+
+        $androidChannelId = $isOrderNotification ? 'demandium_order_notification_v4' : 'demandium';
+        $androidSound = $isOrderNotification ? 'order_notification' : 'notification';
+
         $title = text_variable_data_format($title, $booking_id, $type, $data, $bookingType);
         // $description = blank($description) ? $title : text_variable_data_format($description, $booking_id, $type, $data, $bookingType);
         $notificationImage = resolve_notification_image($image);
@@ -101,7 +125,7 @@ if (!function_exists('device_notification')) {
                     "title" => (string)$title,
                     "body" => (string)$description,
                     "booking_id" => (string)$booking_id,
-                    "channel_id" => (string)$channel_id,
+                    "channel_id" => (string)($channel_id ?? $androidChannelId),
                     "user_id" => (string)$user_id,
                     "type" => (string)$type,
                     "image" => (string)($notificationImage ?? ''),
@@ -133,7 +157,8 @@ if (!function_exists('device_notification')) {
                 ],
                 "android" => [
                     "notification" => [
-                        "channelId" => "demandium",
+                        "channel_id" => (string)($channel_id ?? $androidChannelId),
+                        "sound" => $androidSound,
                         "image" => (string)($notificationImage ?? '')
                     ]
                 ],

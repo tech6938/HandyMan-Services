@@ -443,6 +443,107 @@ class BookingController extends Controller
      * @return JsonResponse
      */
 
+    // public function show(Request $request, string $id): JsonResponse
+    // {
+    //     $provider = $request->user()?->provider;
+    //     if (!$provider) {
+    //         return response()->json(response_formatter(DEFAULT_403, ['message' => 'Provider profile not found']), 403);
+    //     }
+
+    //     $provider_id = $provider->id;
+
+    //     // Fetch child booking — must belong to this provider or be unassigned pending
+    //     $booking = $this->booking->with([
+    //         'detail.service',
+    //         'schedule_histories.user',
+    //         'status_histories.user',
+    //         'service_address',
+    //         'customer',
+    //         'provider',
+    //         'zone',
+    //         'serviceman.user',
+    //         'booking_partial_payments',
+    //         'booking_offline_payments',
+    //         'parentBooking.booking_partial_payments',
+    //         'repeat.detail.service',
+    //         'repeat.repeatHistories',
+    //     ])
+    //         ->whereNotNull('parent_booking_id')
+    //         ->where(function ($query) use ($provider_id) {
+    //             $query->where('provider_id', $provider_id)
+    //                 ->orWhereNull('provider_id');
+    //         })
+    //         ->where('id', $id)
+    //         ->first();
+
+    //     if (!isset($booking)) {
+    //         return response()->json(response_formatter(DEFAULT_204), 200);
+    //     }
+
+    //     if ($booking->parentBooking?->booking_partial_payments->isNotEmpty()) {
+    //         $booking->setRelation('booking_partial_payments', $booking->parentBooking->booking_partial_payments);
+    //     }
+
+    //     $offlinePayment = $booking->booking_offline_payments?->first();
+    //     unset($booking->booking_offline_payments);
+
+    //     if ($offlinePayment) {
+    //         $booking->booking_offline_payment_method = $offlinePayment->method_name;
+    //         $booking->booking_offline_payment = collect($offlinePayment->customer_information)
+    //             ->map(fn($value, $key) => ["key" => $key, "value" => $value])
+    //             ->values()->all();
+    //     }
+
+    //     if ($booking->repeat->isNotEmpty()) {
+    //         $repeatHistoryCollection = $booking->repeat->flatMap(function ($repeat) {
+    //             return $repeat->repeatHistories->map(function ($history) {
+    //                 $history->log_details = json_decode($history->log_details);
+    //                 return $history;
+    //             });
+    //         });
+
+    //         $booking['repeatHistory'] = $repeatHistoryCollection->toArray();
+
+    //         $sortedRepeats = $booking->repeat->sortBy(function ($repeat) {
+    //             $parts  = explode('-', $repeat->readable_id);
+    //             $suffix = end($parts);
+    //             return $this->readableIdToNumber($suffix);
+    //         });
+
+    //         $booking['repeats']      = $sortedRepeats->values()->toArray();
+    //         $nextService             = collect($booking['repeats'])->firstWhere('booking_status', 'ongoing');
+    //         if (!$nextService) {
+    //             $nextService = collect($booking['repeats'])->firstWhere('booking_status', 'accepted');
+    //         }
+
+    //         $booking['nextService']  = $nextService;
+    //         $booking['time']         = max(collect($booking['repeats'])->pluck('service_schedule')->flatten()->toArray());
+    //         $booking['startDate']    = min(collect($booking['repeats'])->pluck('service_schedule')->flatten()->toArray());
+    //         $booking['endDate']      = max(collect($booking['repeats'])->pluck('service_schedule')->flatten()->toArray());
+    //         $booking['totalCount']   = count($booking['repeats']);
+    //         $booking['bookingType']  = $booking['repeats'][0]['booking_type'];
+
+    //         if ($booking['bookingType'] == 'weekly') {
+    //             $booking['weekNames'] = collect($booking['repeats'])
+    //                 ->pluck('service_schedule')
+    //                 ->map(fn($s) => \Carbon\Carbon::parse($s)->format('l'))
+    //                 ->unique()->sort()->values()->toArray();
+    //         }
+
+    //         $booking['completedCount'] = collect($booking['repeats'])->where('booking_status', 'completed')->count();
+    //         $booking['canceledCount']  = collect($booking['repeats'])->where('booking_status', 'canceled')->count();
+
+    //         unset($booking->repeat);
+
+    //         $booking['repeats'] = array_map(function ($repeat) {
+    //             if (isset($repeat['repeat_histories'])) unset($repeat['repeat_histories']);
+    //             return $repeat;
+    //         }, $booking['repeats']);
+    //     }
+
+    //     return response()->json(response_formatter(DEFAULT_200, $booking), 200);
+    // }
+
     public function show(Request $request, string $id): JsonResponse
     {
         $provider = $request->user()?->provider;
@@ -452,8 +553,10 @@ class BookingController extends Controller
 
         $provider_id = $provider->id;
 
-        // Fetch child booking — must belong to this provider or be unassigned pending
-        $booking = $this->booking->with([
+        // Fetch child booking — must belong to this provider or be unassigned pending.
+        // Customized bookings may be stored as root bookings without parent_booking_id,
+        // so fallback to root booking lookup if a child record is not found.
+        $bookingQuery = $this->booking->with([
             'detail.service',
             'schedule_histories.user',
             'status_histories.user',
@@ -468,13 +571,18 @@ class BookingController extends Controller
             'repeat.detail.service',
             'repeat.repeatHistories',
         ])
-            ->whereNotNull('parent_booking_id')
             ->where(function ($query) use ($provider_id) {
                 $query->where('provider_id', $provider_id)
                     ->orWhereNull('provider_id');
             })
-            ->where('id', $id)
-            ->first();
+            ->where('id', $id);
+
+        $booking = (clone $bookingQuery)->whereNotNull('parent_booking_id')->first();
+
+        if (!isset($booking)) {
+            // Fallback for customized bookings stored as the root booking record.
+            $booking = $bookingQuery->whereNull('parent_booking_id')->first();
+        }
 
         if (!isset($booking)) {
             return response()->json(response_formatter(DEFAULT_204), 200);
