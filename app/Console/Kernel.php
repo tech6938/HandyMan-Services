@@ -16,9 +16,10 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         $schedule->command('app:my-cron-job')->daily();
-        // Send booking reminders every 5 minutes (handles 30m, 60m, 5h reminder windows)
-        // $schedule->command('bookings:send-reminders')->everyFiveMinutes();
-        $schedule->command('bookings:send-reminders')->everyMinute();
+
+        $schedule->command('bookings:send-reminders')
+            ->everyFiveMinutes()
+            ->withoutOverlapping();
     }
 
     /**

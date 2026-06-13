@@ -187,10 +187,8 @@ class ProviderController extends Controller
         $provider['time_schedule'] = $timeSchedule ?? null;
         $provider['weekends'] = $weekEnds ?? [];
 
-
         $provider['nextBookingEligibility'] = nextBookingEligibility($provider->id);
         $provider['scheduleBookingEligibility'] = scheduleBookingEligibility($provider->id);
-
 
         $limitStatus = provider_warning_amount_calculate($provider?->owner?->account->account_payable, $provider?->owner?->account->account_receivable);
         $provider['cash_limit_status'] = $limitStatus == false ? 'available' : $limitStatus;
@@ -226,16 +224,65 @@ class ProviderController extends Controller
             ->whereIn('id', $subscribedSubCategoryIds)
             ->get();
 
+        // Apply variation mapper with ratings for each service (SAME AS servicesBySubcategory)
         foreach ($subCategories as $item) {
-            if ($item->services) {
-                $item->services = self::variationMapper($item->services);
+            if ($item->services && $item->services->count() > 0) {
+                // Get all service IDs for this subcategory
+                $serviceIds = $item->services->pluck('id')->toArray();
 
-                foreach ($item->services as $service) {
+                // Get variant ratings from reviews (SAME AS ServiceController)
+                $variantRatingMap = Review::whereIn('service_id', $serviceIds)
+                    ->select(
+                        'service_id',
+                        'variant_id',
+                        DB::raw('AVG(review_rating) as average_rating'),
+                        DB::raw('COUNT(*) as review_count')
+                    )
+                    ->groupBy('service_id', 'variant_id')
+                    ->get()
+                    ->groupBy('service_id')
+                    ->map(function ($group) {
+                        return $group->keyBy('variant_id')->map(function ($item) {
+                            return [
+                                'average_rating' => round($item->average_rating, 2),
+                                'review_count' => (int) $item->review_count,
+                            ];
+                        });
+                    });
+
+                // Map each service with variations_app_format (SAME AS ServiceController)
+                $item->services->map(function ($service) use ($variantRatingMap) {
+                    $variantRatings = $variantRatingMap->has($service->id) ? $variantRatingMap->get($service->id) : collect();
+
+                    // Format variations (SAME AS ServiceController)
+                    $formatting = [];
+                    $filtered = $service['variations']->where('zone_id', Config::get('zone_id'));
+                    $formatting['zone_id'] = Config::get('zone_id');
+                    $formatting['default_price'] = $filtered->first() ? $filtered->first()->price : 0;
+                    $formatting['default_service_img'] = $filtered->first() ? $filtered->first()->service_img_full_path : null;
+
+                    foreach ($filtered as $data) {
+                        $variantRating = $variantRatings->has($data->id) ? $variantRatings->get($data->id) : ['average_rating' => 0, 'review_count' => 0];
+                        $formatting['zone_wise_variations'][] = [
+                            'variant_key' => $data['variant_key'],
+                            'variant_name' => $data['variant'],
+                            'price' => $data['price'],
+                            'service_img' => $data['service_img_full_path'],
+                            'variant_avg_rating' => $variantRating['average_rating'],
+                            'variant_review_count' => $variantRating['review_count'],
+                        ];
+                    }
+
+                    $service['variations_app_format'] = $formatting;
+
+                    // Add favorite status
                     $service->is_favorite = $this->favoriteService
                         ->where('customer_user_id', $this->customer_user_id)
                         ->where('service_id', $service->id)
                         ->exists() ? 1 : 0;
-                }
+
+                    return $service;
+                });
             }
         }
 
@@ -325,7 +372,10 @@ class ProviderController extends Controller
             $formatting['zone_wise_variations'][] = [
                 'variant_key' => $data['variant_key'],
                 'variant_name' => $data['variant'],
-                'price' => $data['price']
+                'price' => $data['price'],
+                'service_img' => $data['service_img'],
+                'variant_avg_rating' => $data['variant_avg_rating'],
+                'variant_review_count' => $data['variant_review_count']
             ];
         }
         return $formatting;
