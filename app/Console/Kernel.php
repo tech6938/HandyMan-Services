@@ -17,9 +17,9 @@ class Kernel extends ConsoleKernel
     {
         $schedule->command('app:my-cron-job')->daily();
 
-        $schedule->command('bookings:send-reminders')
-            ->everyFiveMinutes()
-            ->withoutOverlapping();
+        // $schedule->command('bookings:send-reminders')
+        //     ->everyFiveMinutes()
+        //     ->withoutOverlapping();
     }
 
     /**

@@ -3,147 +3,194 @@
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Modules\BookingModule\Entities\Booking;
+use App\Jobs\SendBookingReminderJob;
 
 class SendBookingReminders extends Command
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
-    protected $signature = 'bookings:send-reminders';
+    protected $signature = 'bookings:send-reminders
+                            {--batch-size=100 : Number of bookings to process per batch}
+                            {--dry-run : Only show what would be processed}
+                            {--force : Force run even if already running}';
 
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
-    protected $description = 'Send scheduled reminders for pending bookings at 30, 60 and 5 hours';
+    protected $description = 'Dispatch booking reminder jobs to queue';
+
+    private const REMINDER_LEVELS = [
+        300  => '5_HOURS',
+        1800 => '30_HOURS',
+        3600 => '60_HOURS',
+    ];
 
     public function handle()
     {
+        $startTime = microtime(true);
+        $dispatchedCount = 0;
         $now = now();
-        $sentCount = 0;
+        $batchSize = (int) $this->option('batch-size');
+        $dryRun = $this->option('dry-run');
+        $force = $this->option('force');
 
-        // Only fetch relevant bookings (up to 3 days old max)
-        Booking::where('booking_status', 'accepted')
-            ->where('created_at', '>=', $now->copy()->subDays(3))
-            ->with(['provider.owner', 'serviceman.user'])
-            ->chunk(200, function ($bookings) use ($now, &$sentCount) {
+        $this->info('🚀 Starting booking reminder dispatch...');
 
-                foreach ($bookings as $booking) {
+        try {
+            // Check if already running
+            if (!$force && $this->isRunning()) {
+                $this->warn('⚠️  Command is already running. Use --force to override.');
+                return 0;
+            }
 
-                    try {
-                        $minutes = $booking->created_at->diffInMinutes($now);
+            // Get bookings that need reminders
+            $bookingsData = $this->getBookingsNeedingReminders($now);
 
-                        // Define exact trigger points
-                        $levels = [
-                            300  => '5_HOURS',
-                            1800 => '30_HOURS',
-                            3600 => '60_HOURS',
-                        ];
+            if (empty($bookingsData)) {
+                $this->info('✅ No bookings need reminders.');
+                return 0;
+            }
 
-                        foreach ($levels as $targetMinutes => $level) {
+            $this->info("📊 Found " . count($bookingsData) . " reminders to process");
 
-                            // Only trigger when crossing threshold
-                            if ($minutes < $targetMinutes) {
-                                continue;
-                            }
+            // Process in batches
+            $batches = array_chunk($bookingsData, $batchSize);
+            $totalBatches = count($batches);
 
-                            // Prevent duplicate sends
-                            $cacheKey = "booking:reminder:{$booking->id}:{$level}";
+            $bar = $this->output->createProgressBar($totalBatches);
+            $bar->start();
 
-                            if (!Cache::add($cacheKey, true, now()->addDays(3))) {
-                                continue;
-                            }
-
-                            // Message
-                            $title = match ($level) {
-                                '5_HOURS' => "⏰ Reminder: Booking pending 5 hours",
-                                '30_HOURS' => "📋 Reminder: Booking pending 30 hours",
-                                '60_HOURS' => "⚠️ Reminder: Booking pending 60 hours",
-                            };
-
-                            $description = "Booking #{$booking->readable_id} is still pending. Please take action.";
-
-                            $sentThisBooking = 0;
-
-                            // Provider
-                            $providerFcm = $booking->provider?->owner?->fcm_token;
-
-                            if ($providerFcm) {
-                                $providerKey = $cacheKey . ":provider";
-
-                                if (Cache::add($providerKey, true, now()->addDays(3))) {
-                                    device_notification(
-                                        $providerFcm,
-                                        $title,
-                                        $description,
-                                        null,
-                                        $booking->parent_booking_id,
-                                        'booking_reminder',
-                                        null,
-                                        $booking->provider?->id,
-                                        null,
-                                        null,
-                                        null
-                                    );
-
-                                    $sentThisBooking++;
-                                }
-                            }
-
-                            // Serviceman
-                            $servicemanFcm = $booking->serviceman?->user?->fcm_token;
-
-                            if ($servicemanFcm) {
-                                $servicemanKey = $cacheKey . ":serviceman";
-
-                                if (Cache::add($servicemanKey, true, now()->addDays(3))) {
-                                    device_notification(
-                                        $servicemanFcm,
-                                        $title,
-                                        $description,
-                                        null,
-                                        $booking->parent_booking_id,
-                                        'booking_reminder',
-                                        null,
-                                        $booking->provider?->id,
-                                        null,
-                                        null,
-                                        null
-                                    );
-
-                                    $sentThisBooking++;
-                                }
-                            }
-
-                            if ($sentThisBooking > 0) {
-                                $sentCount += $sentThisBooking;
-
-                                Log::info('Booking reminder sent', [
-                                    'booking_id' => $booking->id,
-                                    'level' => $level,
-                                    'minutes' => $minutes
-                                ]);
-                            }
-                        }
-                    } catch (\Exception $e) {
-                        Log::error('Booking reminder failed', [
-                            'booking_id' => $booking->id ?? null,
-                            'error' => $e->getMessage()
-                        ]);
-                    }
+            foreach ($batches as $index => $batchData) {
+                if ($dryRun) {
+                    $this->line("\n  ℹ️  Would dispatch " . count($batchData) . " jobs");
+                    continue;
                 }
-            });
 
-        $this->info("Total reminders sent: {$sentCount}");
+                $dispatched = $this->dispatchBatchJobs($batchData);
+                $dispatchedCount += $dispatched;
+
+                $bar->advance();
+                gc_collect_cycles();
+            }
+
+            $bar->finish();
+            $this->newLine();
+
+            $executionTime = round(microtime(true) - $startTime, 2);
+
+            $this->info("✅ Dispatched {$dispatchedCount} jobs in {$executionTime}s");
+
+            if ($dryRun) {
+                $this->line("ℹ️  This was a dry run. No jobs were dispatched.");
+            }
+
+            // Log summary
+            $this->logSummary($dispatchedCount, $executionTime);
+        } catch (\Exception $e) {
+            Log::error('Booking reminder dispatch failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            $this->error('❌ Failed: ' . $e->getMessage());
+            return 1;
+        }
 
         return 0;
     }
+
+    private function getBookingsNeedingReminders($now): array
+    {
+        // Get bookings that are old enough for reminders
+        $minMinutes = min(array_keys(self::REMINDER_LEVELS));
+        $cutoffDate = $now->copy()->subMinutes($minMinutes);
+
+        // Get bookings with their last sent reminders
+        $bookings = Booking::select(
+            'bookings.id',
+            'bookings.created_at',
+            DB::raw('GROUP_CONCAT(booking_reminders.level) as sent_levels')
+        )
+            ->leftJoin('booking_reminders', function ($join) {
+                $join->on('bookings.id', '=', 'booking_reminders.booking_id')
+                    ->where('booking_reminders.sent_at', '>=', now()->subDays(3));
+            })
+            ->where('bookings.booking_status', 'accepted')
+            ->where('bookings.created_at', '>=', $now->copy()->subDays(3))
+            ->where('bookings.created_at', '<=', $cutoffDate)
+            ->groupBy('bookings.id', 'bookings.created_at')
+            ->having(DB::raw('COUNT(booking_reminders.id)'), '<', count(self::REMINDER_LEVELS))
+            ->get();
+
+        $result = [];
+        foreach ($bookings as $booking) {
+            $minutes = $booking->created_at->diffInMinutes($now);
+            $sentLevels = explode(',', $booking->sent_levels ?? '');
+
+            foreach (self::REMINDER_LEVELS as $targetMinutes => $level) {
+                if ($minutes >= $targetMinutes && !in_array($level, $sentLevels)) {
+                    $result[] = [
+                        'id' => $booking->id,
+                        'level' => $level,
+                        'target_minutes' => $targetMinutes
+                    ];
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    private function dispatchBatchJobs(array $batchData): int
+    {
+        $dispatched = 0;
+
+        foreach ($batchData as $data) {
+            try {
+                SendBookingReminderJob::dispatch(
+                    $data['id'],
+                    $data['level'],
+                    $data['target_minutes']
+                )->onQueue('reminders');
+
+                $dispatched++;
+            } catch (\Exception $e) {
+                Log::error('Failed to dispatch job', [
+                    'booking_id' => $data['id'],
+                    'level' => $data['level'],
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        return $dispatched;
+    }
+
+    private function isRunning(): bool
+    {
+        $lockFile = storage_path('framework/booking_reminders.lock');
+
+        if (!file_exists($lockFile)) {
+            return false;
+        }
+
+        $lockTime = filemtime($lockFile);
+        if (time() - $lockTime > 3600) { // 1 hour timeout
+            @unlink($lockFile);
+            return false;
+        }
+
+        return true;
+    }
+
+    private function logSummary($dispatchedCount, $executionTime)
+    {
+        DB::table('command_metrics')->insert([
+            'command' => 'bookings:send-reminders',
+            'jobs_dispatched' => $dispatchedCount,
+            'execution_time' => $executionTime,
+            'memory_usage' => memory_get_peak_usage(true),
+            'created_at' => now()
+        ]);
+    }
+
     // public function handle()
     // {
     //     $now = now();

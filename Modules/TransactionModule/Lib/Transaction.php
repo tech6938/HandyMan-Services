@@ -2,6 +2,7 @@
 
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Modules\BookingModule\Entities\BookingDetailsAmount;
 use Modules\BookingModule\Entities\BookingPartialPayment;
 use Modules\BusinessSettingsModule\Entities\PackageSubscriber;
@@ -391,6 +392,128 @@ if (!function_exists('normalizeAccountReceivablePayable')) {
     }
 }
 
+// if (!function_exists('completeBookingTransactionForDigitalPayment')) {
+//     function completeBookingTransactionForDigitalPayment($booking): void
+//     {
+//         $ledgerSnapshot = getBookingLedgerSnapshot($booking);
+//         $admin_commission = $ledgerSnapshot['admin_commission'];
+//         $provider_earning = $ledgerSnapshot['provider_earning'];
+//         $promotional_cost_by_admin = $ledgerSnapshot['promotional_cost_by_admin'];
+//         $promotional_cost_by_provider = $ledgerSnapshot['promotional_cost_by_provider'];
+
+//         //user ids (from/to)
+//         $admin_user_id = User::where('user_type', ADMIN_USER_TYPES[0])->first()->id;
+//         $provider_user_id = get_user_id($booking['provider_id'], PROVIDER_USER_TYPES[0]);
+
+//         DB::transaction(function () use ($booking, $admin_user_id, $provider_user_id, $admin_commission, $provider_earning, $promotional_cost_by_admin, $promotional_cost_by_provider) {
+
+//             $account = Account::where('user_id', $admin_user_id)->first();
+//             $account->balance_pending -= $booking['total_booking_amount'];
+//             $account->save();
+
+//             //Admin transaction (-pending)
+//             $primary_transaction = Transaction::create([
+//                 'ref_trx_id' => null,
+//                 'booking_id' => $booking['id'],
+//                 'trx_type' => TRX_TYPE['pending_amount'],
+//                 'debit' => $booking['total_booking_amount'],
+//                 'credit' => 0,
+//                 'balance' => $account->balance_pending,
+//                 'from_user_id' => $admin_user_id,
+//                 'to_user_id' => $provider_user_id,
+//                 'from_user_account' => ACCOUNT_STATES[0]['value'],
+//                 'to_user_account' => null
+//             ]);
+
+//             //Provider transactions (+receivable)
+//             $account = Account::where('user_id', $provider_user_id)->first();
+//             $account->account_receivable += $provider_earning;
+//             $account->save();
+
+//             Transaction::create([
+//                 'ref_trx_id' => $primary_transaction['id'],
+//                 'booking_id' => $booking['id'],
+//                 'trx_type' => TRX_TYPE['receivable_amount'],
+//                 'debit' => 0,
+//                 'credit' => $provider_earning,
+//                 'balance' => $account->account_receivable,
+//                 'from_user_id' => $admin_user_id,
+//                 'to_user_id' => $provider_user_id,
+//                 'from_user_account' => null,
+//                 'to_user_account' => ACCOUNT_STATES[3]['value']
+//             ]);
+
+//             if ($admin_commission > 0) {
+//                 //Admin transactions for commission (+received)
+//                 $account = Account::where('user_id', $admin_user_id)->first();
+//                 $account->received_balance += $admin_commission;
+//                 $account->save();
+
+//                 Transaction::create([
+//                     'ref_trx_id' => $primary_transaction['id'],
+//                     'booking_id' => $booking['id'],
+//                     'trx_type' => TRX_TYPE['received_commission'],
+//                     'debit' => 0,
+//                     'credit' => $admin_commission,
+//                     'balance' => $account->received_balance,
+//                     'from_user_id' => $admin_user_id,
+//                     'to_user_id' => $admin_user_id,
+//                     'from_user_account' => ACCOUNT_STATES[1]['value'],
+//                     'to_user_account' => null
+//                 ]);
+//             }
+
+//             //admin extra fee transaction
+//             if ($booking['extra_fee'] > 0) {
+//                 //Admin transactions for extra fee (+received_balance)
+//                 $account = Account::where('user_id', $admin_user_id)->first();
+//                 $account->received_balance += $booking['extra_fee'];
+//                 $account->save();
+
+//                 Transaction::create([
+//                     'ref_trx_id' => $primary_transaction['id'],
+//                     'booking_id' => $booking['id'],
+//                     'trx_type' => TRX_TYPE['received_extra_fee'],
+//                     'debit' => 0,
+//                     'credit' => $booking['extra_fee'],
+//                     'balance' => $account->received_balance,
+//                     'from_user_id' => $admin_user_id,
+//                     'to_user_id' => $admin_user_id,
+//                     'from_user_account' => ACCOUNT_STATES[1]['value'],
+//                     'to_user_account' => null
+//                 ]);
+//             }
+
+//             //Admin transactions (+payable)
+//             $account = Account::where('user_id', $admin_user_id)->first();
+//             $account->account_payable += $provider_earning;
+//             $account->save();
+
+//             Transaction::create([
+//                 'ref_trx_id' => $primary_transaction['id'],
+//                 'booking_id' => $booking['id'],
+//                 'trx_type' => TRX_TYPE['payable_amount'],
+//                 'debit' => 0,
+//                 'credit' => $provider_earning,
+//                 'balance' => $account->account_payable,
+//                 'from_user_id' => $admin_user_id,
+//                 'to_user_id' => $admin_user_id,
+//                 'from_user_account' => ACCOUNT_STATES[2]['value'],
+//                 'to_user_account' => null
+//             ]);
+
+//             //expense
+//             $account = Account::where('user_id', $admin_user_id)->first();
+//             $account->total_expense += $promotional_cost_by_admin;
+//             $account->save();
+
+//             $account = Account::where('user_id', $provider_user_id)->first();
+//             $account->total_expense += $promotional_cost_by_provider;
+//             $account->save();
+//         });
+//     }
+// }
+
 if (!function_exists('completeBookingTransactionForDigitalPayment')) {
     function completeBookingTransactionForDigitalPayment($booking): void
     {
@@ -406,9 +529,27 @@ if (!function_exists('completeBookingTransactionForDigitalPayment')) {
 
         DB::transaction(function () use ($booking, $admin_user_id, $provider_user_id, $admin_commission, $provider_earning, $promotional_cost_by_admin, $promotional_cost_by_provider) {
 
-            $account = Account::where('user_id', $admin_user_id)->first();
-            $account->balance_pending -= $booking['total_booking_amount'];
-            $account->save();
+            // Get current payable balance BEFORE any changes
+            $adminAccount = Account::where('user_id', $admin_user_id)->first();
+            $providerAccount = Account::where('user_id', $provider_user_id)->first();
+
+            $currentPayable = $adminAccount->account_payable;
+            $currentReceivable = $providerAccount->account_receivable;
+
+            // Calculate net settlement
+            if ($provider_earning >= $currentPayable) {
+                // Case: Provider earns >= their payable
+                $netReceivable = $provider_earning - $currentPayable;
+                $remainingPayable = 0;
+            } else {
+                // Case: Provider earns < their payable
+                $netReceivable = 0;
+                $remainingPayable = $currentPayable - $provider_earning;
+            }
+
+            // Update admin pending balance
+            $adminAccount->balance_pending -= $booking['total_booking_amount'];
+            $adminAccount->save();
 
             //Admin transaction (-pending)
             $primary_transaction = Transaction::create([
@@ -417,36 +558,38 @@ if (!function_exists('completeBookingTransactionForDigitalPayment')) {
                 'trx_type' => TRX_TYPE['pending_amount'],
                 'debit' => $booking['total_booking_amount'],
                 'credit' => 0,
-                'balance' => $account->balance_pending,
+                'balance' => $adminAccount->balance_pending,
                 'from_user_id' => $admin_user_id,
                 'to_user_id' => $provider_user_id,
                 'from_user_account' => ACCOUNT_STATES[0]['value'],
                 'to_user_account' => null
             ]);
 
-            //Provider transactions (+receivable)
-            $account = Account::where('user_id', $provider_user_id)->first();
-            $account->account_receivable += $provider_earning;
-            $account->save();
+            //Provider transactions (+receivable) - ONLY if net receivable > 0
+            if ($netReceivable > 0) {
+                $providerAccount = Account::where('user_id', $provider_user_id)->first();
+                $providerAccount->account_receivable += $netReceivable;
+                $providerAccount->save();
 
-            Transaction::create([
-                'ref_trx_id' => $primary_transaction['id'],
-                'booking_id' => $booking['id'],
-                'trx_type' => TRX_TYPE['receivable_amount'],
-                'debit' => 0,
-                'credit' => $provider_earning,
-                'balance' => $account->account_receivable,
-                'from_user_id' => $admin_user_id,
-                'to_user_id' => $provider_user_id,
-                'from_user_account' => null,
-                'to_user_account' => ACCOUNT_STATES[3]['value']
-            ]);
+                Transaction::create([
+                    'ref_trx_id' => $primary_transaction['id'],
+                    'booking_id' => $booking['id'],
+                    'trx_type' => TRX_TYPE['receivable_amount'],
+                    'debit' => 0,
+                    'credit' => $netReceivable,
+                    'balance' => $providerAccount->account_receivable,
+                    'from_user_id' => $admin_user_id,
+                    'to_user_id' => $provider_user_id,
+                    'from_user_account' => null,
+                    'to_user_account' => ACCOUNT_STATES[3]['value']
+                ]);
+            }
 
             if ($admin_commission > 0) {
                 //Admin transactions for commission (+received)
-                $account = Account::where('user_id', $admin_user_id)->first();
-                $account->received_balance += $admin_commission;
-                $account->save();
+                $adminAccount = Account::where('user_id', $admin_user_id)->first();
+                $adminAccount->received_balance += $admin_commission;
+                $adminAccount->save();
 
                 Transaction::create([
                     'ref_trx_id' => $primary_transaction['id'],
@@ -454,7 +597,7 @@ if (!function_exists('completeBookingTransactionForDigitalPayment')) {
                     'trx_type' => TRX_TYPE['received_commission'],
                     'debit' => 0,
                     'credit' => $admin_commission,
-                    'balance' => $account->received_balance,
+                    'balance' => $adminAccount->received_balance,
                     'from_user_id' => $admin_user_id,
                     'to_user_id' => $admin_user_id,
                     'from_user_account' => ACCOUNT_STATES[1]['value'],
@@ -464,10 +607,9 @@ if (!function_exists('completeBookingTransactionForDigitalPayment')) {
 
             //admin extra fee transaction
             if ($booking['extra_fee'] > 0) {
-                //Admin transactions for extra fee (+received_balance)
-                $account = Account::where('user_id', $admin_user_id)->first();
-                $account->received_balance += $booking['extra_fee'];
-                $account->save();
+                $adminAccount = Account::where('user_id', $admin_user_id)->first();
+                $adminAccount->received_balance += $booking['extra_fee'];
+                $adminAccount->save();
 
                 Transaction::create([
                     'ref_trx_id' => $primary_transaction['id'],
@@ -475,7 +617,7 @@ if (!function_exists('completeBookingTransactionForDigitalPayment')) {
                     'trx_type' => TRX_TYPE['received_extra_fee'],
                     'debit' => 0,
                     'credit' => $booking['extra_fee'],
-                    'balance' => $account->received_balance,
+                    'balance' => $adminAccount->received_balance,
                     'from_user_id' => $admin_user_id,
                     'to_user_id' => $admin_user_id,
                     'from_user_account' => ACCOUNT_STATES[1]['value'],
@@ -483,37 +625,38 @@ if (!function_exists('completeBookingTransactionForDigitalPayment')) {
                 ]);
             }
 
-            //Admin transactions (+payable)
-            $account = Account::where('user_id', $admin_user_id)->first();
-            $account->account_payable += $provider_earning;
-            $account->save();
+            //Admin transactions - UPDATE payable with remaining amount
+            $adminAccount = Account::where('user_id', $admin_user_id)->first();
+            $adminAccount->account_payable = $remainingPayable;
+            $adminAccount->save();
 
-            Transaction::create([
-                'ref_trx_id' => $primary_transaction['id'],
-                'booking_id' => $booking['id'],
-                'trx_type' => TRX_TYPE['payable_amount'],
-                'debit' => 0,
-                'credit' => $provider_earning,
-                'balance' => $account->account_payable,
-                'from_user_id' => $admin_user_id,
-                'to_user_id' => $admin_user_id,
-                'from_user_account' => ACCOUNT_STATES[2]['value'],
-                'to_user_account' => null
-            ]);
+            // Only create transaction if there's remaining payable
+            if ($remainingPayable > 0) {
+                Transaction::create([
+                    'ref_trx_id' => $primary_transaction['id'],
+                    'booking_id' => $booking['id'],
+                    'trx_type' => TRX_TYPE['payable_amount'],
+                    'debit' => 0,
+                    'credit' => $remainingPayable,
+                    'balance' => $adminAccount->account_payable,
+                    'from_user_id' => $admin_user_id,
+                    'to_user_id' => $admin_user_id,
+                    'from_user_account' => ACCOUNT_STATES[2]['value'],
+                    'to_user_account' => null
+                ]);
+            }
 
             //expense
-            $account = Account::where('user_id', $admin_user_id)->first();
-            $account->total_expense += $promotional_cost_by_admin;
-            $account->save();
+            $adminAccount = Account::where('user_id', $admin_user_id)->first();
+            $adminAccount->total_expense += $promotional_cost_by_admin;
+            $adminAccount->save();
 
-            $account = Account::where('user_id', $provider_user_id)->first();
-            $account->total_expense += $promotional_cost_by_provider;
-            $account->save();
+            $providerAccount = Account::where('user_id', $provider_user_id)->first();
+            $providerAccount->total_expense += $promotional_cost_by_provider;
+            $providerAccount->save();
         });
     }
 }
-
-
 
 if (!function_exists('completeBookingTransactionForCashAfterService')) {
     function completeBookingTransactionForCashAfterService($booking): void
@@ -853,7 +996,7 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
     //         $providerAccount = Account::where('user_id', $provider_user_id)->first();
 
     //         // Log before update
-    //         \Illuminate\Support\Facades\Log::info('Before update - admin account', [
+    //         \Illuminate\Support\FacadesLog::info('Before update - admin account', [
     //             'booking_id' => $booking['id'],
     //             'current_account_payable' => $adminAccount->account_payable,
     //             'current_received_balance' => $adminAccount->received_balance,
@@ -869,7 +1012,7 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
     //         $adminAccount->save();
 
     //         // Log after save to verify
-    //         \Illuminate\Support\Facades\Log::info('After admin save - verification', [
+    //         \Illuminate\Support\FacadesLog::info('After admin save - verification', [
     //             'booking_id' => $booking['id'],
     //             'saved_account_payable' => $adminAccount->account_payable,
     //             'saved_received_balance' => $adminAccount->received_balance,
@@ -959,7 +1102,7 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
     //         // Final verification from database
     //         $finalAdminAccount = Account::where('user_id', $admin_user_id)->first();
 
-    //         \Illuminate\Support\Facades\Log::info('Partial CAS Transaction Completed', [
+    //         \Illuminate\Support\FacadesLog::info('Partial CAS Transaction Completed', [
     //             'booking_id' => $booking['id'],
     //             'wallet_paid' => $wallet_paid,
     //             'cash_due' => $cash_due,
@@ -1122,7 +1265,7 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
             $providerAccount->save();
 
             // Log the transaction
-            // \Illuminate\Support\Facades\Log::info('Partial CAS Transaction Completed - Mixed Payment', [
+            // \Illuminate\Support\FacadesLog::info('Partial CAS Transaction Completed - Mixed Payment', [
             //     'booking_id' => $booking['id'],
             //     'total_amount' => $booking['total_booking_amount'],
             //     'wallet_paid' => $wallet_paid,
