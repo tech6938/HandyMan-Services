@@ -1250,6 +1250,180 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
     //     });
     // }
 
+    // function completeBookingTransactionForPartialCas($booking): void
+    // {
+    //     // Get partial payment from parent if this is a child booking
+    //     $partialPaymentBookingId = $booking->parent_booking_id ?? $booking->id;
+    //     $booking_partial_payment = BookingPartialPayment::where('booking_id', $partialPaymentBookingId)
+    //         ->where('paid_with', 'wallet')->first();
+
+    //     if (!$booking_partial_payment) {
+    //         return;
+    //     }
+
+    //     $wallet_paid = (float) $booking_partial_payment->paid_amount;
+    //     $total_amount = (float) $booking['total_booking_amount'];
+    //     $cash_due = $total_amount - $wallet_paid;
+
+    //     // Calculate admin commission from services
+    //     $admin_commission = 0;
+    //     if ($booking->detail->isNotEmpty()) {
+    //         foreach ($booking->detail as $detail) {
+    //             $serviceCommission = ServiceCommission::where('service_id', $detail->service_id)->first();
+    //             if ($serviceCommission) {
+    //                 $commission_value = (float) $serviceCommission->commission;
+    //                 $commission_type = $serviceCommission->commission_type;
+
+    //                 if ($commission_type == 'percent') {
+    //                     $service_cost = (float) $detail->service_cost * (int) $detail->quantity;
+    //                     $item_commission = ($commission_value / 100) * $service_cost;
+    //                 } else {
+    //                     $item_commission = $commission_value;
+    //                 }
+
+    //                 $admin_commission += $item_commission;
+    //             }
+    //         }
+    //     }
+
+    //     // Calculate provider earning
+    //     $provider_earning = $total_amount - $admin_commission;
+
+    //     // For mixed payment scenario:
+    //     // Admin receives the entire wallet amount
+    //     // Provider keeps all cash
+    //     // Provider should receive remaining earnings as wallet credit
+
+    //     $provider_net_earning = $provider_earning;
+    //     $provider_cash_received = $cash_due;
+    //     $provider_wallet_credit = $provider_net_earning - $provider_cash_received;
+
+    //     // Admin commission comes from wallet payment
+    //     $admin_commission_from_wallet = min($admin_commission, $wallet_paid);
+    //     $wallet_amount_to_admin = $wallet_paid;
+
+    //     // user ids
+    //     $admin_user_id = User::where('user_type', ADMIN_USER_TYPES[0])->first()->id;
+    //     $provider_user_id = get_user_id($booking['provider_id'], PROVIDER_USER_TYPES[0]);
+
+    //     DB::transaction(function () use ($booking, $admin_user_id, $provider_user_id, $wallet_paid, $cash_due, $admin_commission, $provider_earning, $provider_wallet_credit, $admin_commission_from_wallet, $wallet_amount_to_admin) {
+
+    //         // Get accounts
+    //         $adminAccount = Account::where('user_id', $admin_user_id)->first();
+    //         $providerAccount = Account::where('user_id', $provider_user_id)->first();
+
+    //         // ===== NEW LOGIC: Handle receivable deduction and payable creation =====
+    //         $receivable_deduction = 0;
+    //         $payable_amount = 0;
+    //         $provider_wallet_amount = $provider_wallet_credit;
+
+    //         // Check if provider collected more cash than they should earn
+    //         if ($cash_due > $provider_earning) {
+    //             // How much extra cash provider collected
+    //             $excess_cash = $cash_due - $provider_earning;
+
+    //             // First, use receivable to offset the excess (if provider has receivable)
+    //             if ($providerAccount->account_receivable > 0) {
+    //                 $receivable_deduction = min($excess_cash, $providerAccount->account_receivable);
+    //                 $providerAccount->account_receivable -= $receivable_deduction;
+    //                 $excess_cash -= $receivable_deduction;
+    //             }
+
+    //             // If still excess cash remains, it becomes payable (provider owes admin)
+    //             if ($excess_cash > 0) {
+    //                 $payable_amount = $excess_cash;
+    //                 $providerAccount->account_payable += $payable_amount;
+    //             }
+
+    //             // No wallet credit when cash_due > provider_earning
+    //             $provider_wallet_amount = 0;
+    //         } else {
+    //             // OLD FUNCTIONALITY: Provider gets wallet credit as normal
+    //             $provider_wallet_amount = $provider_wallet_credit;
+
+    //             // Only add to receivable if positive
+    //             if ($provider_wallet_amount > 0) {
+    //                 $providerAccount->account_receivable += $provider_wallet_amount;
+    //             }
+    //         }
+
+    //         /** WALLET PAYMENT HANDLING */
+    //         // Admin receives wallet payment
+    //         $adminAccount->received_balance += $admin_commission_from_wallet;
+    //         $adminAccount->balance_pending -= $wallet_paid;
+
+    //         // Create primary transaction for wallet payment
+    //         $primary_transaction = Transaction::create([
+    //             'ref_trx_id' => null,
+    //             'booking_id' => $booking['id'],
+    //             'trx_type' => TRX_TYPE['pending_amount'],
+    //             'debit' => $wallet_paid,
+    //             'credit' => 0,
+    //             'balance' => $adminAccount->balance_pending,
+    //             'from_user_id' => $admin_user_id,
+    //             'to_user_id' => $provider_user_id,
+    //             'from_user_account' => ACCOUNT_STATES[0]['value'],
+    //             'to_user_account' => null
+    //         ]);
+
+    //         // Admin commission transaction
+    //         if ($admin_commission_from_wallet > 0) {
+    //             Transaction::create([
+    //                 'ref_trx_id' => $primary_transaction['id'],
+    //                 'booking_id' => $booking['id'],
+    //                 'trx_type' => TRX_TYPE['received_commission'],
+    //                 'debit' => 0,
+    //                 'credit' => $admin_commission_from_wallet,
+    //                 'balance' => $adminAccount->received_balance,
+    //                 'from_user_id' => $admin_user_id,
+    //                 'to_user_id' => $admin_user_id,
+    //                 'from_user_account' => ACCOUNT_STATES[1]['value'],
+    //                 'to_user_account' => null
+    //             ]);
+    //         }
+
+    //         // Provider wallet credit transaction
+    //         if ($provider_wallet_amount > 0) {
+    //             Transaction::create([
+    //                 'ref_trx_id' => $primary_transaction['id'],
+    //                 'booking_id' => $booking['id'],
+    //                 'trx_type' => TRX_TYPE['receivable_amount'],
+    //                 'debit' => 0,
+    //                 'credit' => $provider_wallet_amount,
+    //                 'balance' => $providerAccount->account_receivable,
+    //                 'from_user_id' => $admin_user_id,
+    //                 'to_user_id' => $provider_user_id,
+    //                 'from_user_account' => null,
+    //                 'to_user_account' => ACCOUNT_STATES[3]['value']
+    //             ]);
+    //         }
+
+    //         /** CASH PORTION HANDLING */
+    //         if ($cash_due > 0) {
+    //             // Calculate cash to provider (subtract both deductions)
+    //             $cash_to_provider = $cash_due - $receivable_deduction - $payable_amount;
+    //             $providerAccount->received_balance += $cash_to_provider;
+
+    //             Transaction::create([
+    //                 'ref_trx_id' => $primary_transaction['id'],
+    //                 'booking_id' => $booking['id'],
+    //                 'trx_type' => TRX_TYPE['received_amount'],
+    //                 'debit' => 0,
+    //                 'credit' => $cash_to_provider,
+    //                 'balance' => $providerAccount->received_balance,
+    //                 'from_user_id' => $provider_user_id,
+    //                 'to_user_id' => $provider_user_id,
+    //                 'from_user_account' => null,
+    //                 'to_user_account' => ACCOUNT_STATES[1]['value']
+    //             ]);
+    //         }
+
+    //         // Save both accounts
+    //         $adminAccount->save();
+    //         $providerAccount->save();
+    //     });
+    // }
+
     function completeBookingTransactionForPartialCas($booking): void
     {
         // Get partial payment from parent if this is a child booking
@@ -1312,36 +1486,43 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
             $adminAccount = Account::where('user_id', $admin_user_id)->first();
             $providerAccount = Account::where('user_id', $provider_user_id)->first();
 
-            // ===== NEW LOGIC: Handle receivable deduction and payable creation =====
+            // ===== LOGIC: Handle all scenarios =====
             $receivable_deduction = 0;
-            $payable_amount = 0;
+            $payable_creation = 0;
+            $payable_deduction = 0;
             $provider_wallet_amount = $provider_wallet_credit;
 
             // Check if provider collected more cash than they should earn
             if ($cash_due > $provider_earning) {
-                // How much extra cash provider collected
+                // Case 1: Cash > Earning - Provider owes excess
                 $excess_cash = $cash_due - $provider_earning;
 
-                // First, use receivable to offset the excess (if provider has receivable)
+                // First, use receivable to offset excess
                 if ($providerAccount->account_receivable > 0) {
                     $receivable_deduction = min($excess_cash, $providerAccount->account_receivable);
                     $providerAccount->account_receivable -= $receivable_deduction;
                     $excess_cash -= $receivable_deduction;
                 }
 
-                // If still excess cash remains, it becomes payable (provider owes admin)
+                // Remaining excess becomes payable
                 if ($excess_cash > 0) {
-                    $payable_amount = $excess_cash;
-                    $providerAccount->account_payable += $payable_amount;
+                    $payable_creation = $excess_cash;
+                    $providerAccount->account_payable += $payable_creation;
                 }
 
-                // No wallet credit when cash_due > provider_earning
                 $provider_wallet_amount = 0;
             } else {
-                // OLD FUNCTIONALITY: Provider gets wallet credit as normal
+                // Case 2: Cash <= Earning - Provider gets wallet credit
                 $provider_wallet_amount = $provider_wallet_credit;
 
-                // Only add to receivable if positive
+                // Deduct existing payable from wallet credit
+                if ($providerAccount->account_payable > 0 && $provider_wallet_amount > 0) {
+                    $payable_deduction = min($provider_wallet_amount, $providerAccount->account_payable);
+                    $provider_wallet_amount -= $payable_deduction;
+                    $providerAccount->account_payable -= $payable_deduction;
+                }
+
+                // Add remaining to receivable
                 if ($provider_wallet_amount > 0) {
                     $providerAccount->account_receivable += $provider_wallet_amount;
                 }
@@ -1400,8 +1581,8 @@ if (!function_exists('completeBookingTransactionForPartialCas')) {
 
             /** CASH PORTION HANDLING */
             if ($cash_due > 0) {
-                // Calculate cash to provider (subtract both deductions)
-                $cash_to_provider = $cash_due - $receivable_deduction - $payable_amount;
+                // Calculate cash to provider (subtract receivable deduction and payable creation)
+                $cash_to_provider = $cash_due - $receivable_deduction - $payable_creation;
                 $providerAccount->received_balance += $cash_to_provider;
 
                 Transaction::create([

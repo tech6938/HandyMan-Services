@@ -6,8 +6,10 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Modules\CategoryManagement\Entities\Category;
+use Modules\ReviewModule\Entities\Review;
 use Modules\ServiceManagement\Entities\FavoriteService;
 use Modules\ServiceManagement\Entities\RecentView;
 
@@ -129,34 +131,75 @@ class CategoryController extends Controller
             ->latest()
             ->paginate($request['limit'], ['*'], 'offset', $request['offset'])->withPath('');
 
+        // Get all service IDs from the collection for batch review aggregation
+        $allServices = collect();
         foreach ($categories as $category) {
-            $category->services_by_category = self::variationMapper($category->services_by_category);
+            if ($category->services_by_category) {
+                $allServices = $allServices->merge($category->services_by_category);
+            }
+        }
+        $serviceIds = $allServices->pluck('id')->unique()->toArray();
+
+        // Batch fetch review aggregates for all services at once
+        $reviewAggregates = [];
+        if (!empty($serviceIds)) {
+            $reviewData = Review::whereIn('service_id', $serviceIds)
+                ->where('is_active', 1)
+                ->select(
+                    'service_id',
+                    'variant_id',
+                    DB::raw('AVG(review_rating) as average_rating'),
+                    DB::raw('COUNT(*) as review_count')
+                )
+                ->groupBy('service_id', 'variant_id')
+                ->get()
+                ->groupBy('service_id');
+
+            foreach ($reviewData as $serviceId => $variants) {
+                foreach ($variants as $variant) {
+                    $reviewAggregates[$serviceId][$variant->variant_id] = [
+                        'average_rating' => round($variant->average_rating, 2),
+                        'review_count' => (int) $variant->review_count,
+                    ];
+                }
+            }
+        }
+
+        foreach ($categories as $category) {
+            $category->services_by_category = self::variationMapper($category->services_by_category, $reviewAggregates);
         }
 
         return response()->json(response_formatter(DEFAULT_200, $categories), 200);
     }
 
-    private function variationMapper($services)
+    private function variationMapper($services, $reviewAggregates = [])
     {
-        $services->map(function ($service) {
-            $service['is_favorite'] = $this->favoriteService->where('customer_user_id',$this->customer_user_id)->where('service_id',$service->id)->exists() ? 1 : 0;
-            $service['variations_app_format'] = self::variationsAppFormat($service);
+        $services->map(function ($service) use ($reviewAggregates) {
+            $service['is_favorite'] = $this->favoriteService->where('customer_user_id', $this->customer_user_id)->where('service_id', $service->id)->exists() ? 1 : 0;
+            $service['variations_app_format'] = self::variationsAppFormat($service, $reviewAggregates[$service->id] ?? []);
             return $service;
         });
         return $services;
     }
 
-    private function variationsAppFormat($service): array
+    private function variationsAppFormat($service, $variantAggregates = []): array
     {
         $formatting = [];
         $filtered = $service['variations']->where('zone_id', Config::get('zone_id'));
         $formatting['zone_id'] = Config::get('zone_id');
         $formatting['default_price'] = $filtered->first() ? $filtered->first()->price : 0;
+
         foreach ($filtered as $data) {
+            $variantId = $data['id'];
+            $aggregate = $variantAggregates[$variantId] ?? ['average_rating' => 0, 'review_count' => 0];
+
             $formatting['zone_wise_variations'][] = [
                 'variant_key' => $data['variant_key'],
                 'variant_name' => $data['variant'],
-                'price' => $data['price']
+                'price' => $data['price'],
+                'service_img' => $data['service_img_full_path'] ?? null,
+                'variant_avg_rating' => $aggregate['average_rating'],
+                'variant_review_count' => $aggregate['review_count']
             ];
         }
         return $formatting;

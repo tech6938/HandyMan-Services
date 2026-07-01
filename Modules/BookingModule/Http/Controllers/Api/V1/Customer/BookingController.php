@@ -400,8 +400,6 @@ class BookingController extends Controller
                     'booking_status'   => $child->booking_status,
                     'booking_otp'      => $child->booking_otp,
                     'service_schedule' => $child->service_schedule,
-                    // 'evidence_photos' => $child->evidence_photos ?? [],
-                    // 'evidence_photos_full_path' => $child->evidence_photos_full_path ?? [],
                     'provider'         => $child->provider ? [
                         'id'    => $child->provider->id,
                         'user_id' => $child->provider->user_id,
@@ -436,20 +434,6 @@ class BookingController extends Controller
                     ])->values(),
                 ];
             })->values();
-
-            // $booking->evidence_photos = $booking->childBookings
-            //     ->flatMap(fn($child) => $child->evidence_photos ?? [])
-            //     ->values()
-            //     ->all();
-
-            // $booking->setAttribute(
-            //     'evidence_photos_full_path',
-            //     $booking->childBookings
-            //         ->flatMap(fn($child) => $child->evidence_photos_full_path ?? [])
-            //         ->filter()
-            //         ->values()
-            //         ->all()
-            // );
 
             // Push first child's provider/serviceman/category onto parent
             $firstChild = $booking->childBookings->first();
