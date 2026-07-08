@@ -1492,6 +1492,88 @@ class BookingController extends Controller
      * @param Request $request
      * @return JsonResponse
      */
+    // public function updateBooking(Request $request): JsonResponse
+    // {
+    //     $validator = Validator::make($request->all(), [
+    //         'booking_id' => 'required|uuid',
+    //         'service_info' => 'required',
+    //         'payment_status' => 'nullable|in:0,1',
+    //         'serviceman_id' => 'nullable',
+    //         'booking_status' => 'nullable|in:' . implode(',', array_column(BOOKING_STATUSES, 'key')),
+    //         'service_schedule' => 'nullable',
+    //     ]);
+
+    //     if ($validator->fails()) {
+    //         return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
+    //     }
+
+    //     $booking = $this->booking
+    //         ->with('detail')
+    //         ->where('id', $request['booking_id'])
+    //         ->where(function ($query) use ($request) {
+    //             return $query->where('provider_id', $request->user()->provider->id)->orWhereNull('provider_id');
+    //         })->first();
+
+    //     if (!is_null($request['payment_status'])) $booking->is_paid = $request['payment_status'];
+    //     if (!is_null($request['serviceman_id'])) $booking->serviceman_id = $request['serviceman_id'];
+    //     if (!is_null($request['booking_status'])) $booking->booking_status = $request['booking_status'];
+    //     if (!is_null($request['service_schedule'])) $booking->service_schedule = $request['service_schedule'];
+    //     $booking->save();
+
+    //     $providerEditAccess = (bool)business_config('provider_can_edit_booking', 'provider_config')?->live_values;
+    //     $request['service_info'] = collect(json_decode($request['service_info'], true));
+    //     $serviceInfoValidated = $request['service_info']?->first()['quantity'] ?? null;
+
+    //     if ($providerEditAccess && $serviceInfoValidated) {
+    //         $existingServices = $this->bookingDetail->where('booking_id', $request['booking_id'])->get();
+    //         foreach ($existingServices as $item) {
+    //             if (!$request['service_info']->where('service_id', $item->service_id)->where('variant_key', $item->variant_key)->first()) {
+    //                 $request['service_info']->push([
+    //                     'service_id' => $item->service_id,
+    //                     'variant_key' => $item->variant_key,
+    //                     'quantity' => 0,
+    //                 ]);
+    //             }
+    //         }
+
+
+    //         foreach ($request['service_info'] as $key => $item) {
+    //             $existingService = $this->bookingDetail
+    //                 ->where('booking_id', $request['booking_id'])
+    //                 ->where('service_id', $item['service_id'])
+    //                 ->where('variant_key', $item['variant_key'])
+    //                 ->first();
+
+    //             if (!$existingService) {
+    //                 $request['service_id'] = $item['service_id'];
+    //                 $request['variant_key'] = $item['variant_key'];
+    //                 $request['quantity'] = $item['quantity'];
+    //                 $this->addNewBookingService($request);
+    //             } else if ($existingService && $item['quantity'] == 0) {
+    //                 $request['service_id'] = $item['service_id'];
+    //                 $request['variant_key'] = $item['variant_key'];
+    //                 $request['quantity'] = $item['quantity'];
+
+    //                 $this->remove_service_from_booking($request);
+    //             } else if ($existingService && $existingService->quantity < $item['quantity']) {
+    //                 $request['service_id'] = $item['service_id'];
+    //                 $request['variant_key'] = $item['variant_key'];
+    //                 $request['old_quantity'] = $existingService->quantity;
+    //                 $request['new_quantity'] = (int)$item['quantity'];
+    //                 $this->increase_service_quantity_from_booking($request);
+    //             } else if ($existingService && $existingService->quantity > $item['quantity']) {
+    //                 $request['service_id'] = $item['service_id'];
+    //                 $request['variant_key'] = $item['variant_key'];
+    //                 $request['old_quantity'] = $existingService->quantity;
+    //                 $request['new_quantity'] = (int)$item['quantity'];
+
+    //                 $this->decrease_service_quantity_from_booking($request);
+    //             }
+    //         }
+    //     }
+    //     return response()->json(response_formatter(DEFAULT_UPDATE_200), 200);
+    // }
+
     public function updateBooking(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
@@ -1517,7 +1599,25 @@ class BookingController extends Controller
         if (!is_null($request['payment_status'])) $booking->is_paid = $request['payment_status'];
         if (!is_null($request['serviceman_id'])) $booking->serviceman_id = $request['serviceman_id'];
         if (!is_null($request['booking_status'])) $booking->booking_status = $request['booking_status'];
-        if (!is_null($request['service_schedule'])) $booking->service_schedule = $request['service_schedule'];
+
+        // ✅ FIX: If service_schedule is updated, update both child AND parent
+        if (!is_null($request['service_schedule'])) {
+            $booking->service_schedule = $request['service_schedule'];
+
+            // ✅ If this is a child booking, update the parent's service_schedule too
+            if ($booking->parent_booking_id) {
+                $parentBooking = $this->booking
+                    ->where('id', $booking->parent_booking_id)
+                    ->first();
+
+                if ($parentBooking) {
+                    $parentBooking->service_schedule = $request['service_schedule'];
+                    $parentBooking->is_paid = $request['payment_status'];
+                    $parentBooking->save();
+                }
+            }
+        }
+
         $booking->save();
 
         $providerEditAccess = (bool)business_config('provider_can_edit_booking', 'provider_config')?->live_values;
@@ -1535,7 +1635,6 @@ class BookingController extends Controller
                     ]);
                 }
             }
-
 
             foreach ($request['service_info'] as $key => $item) {
                 $existingService = $this->bookingDetail

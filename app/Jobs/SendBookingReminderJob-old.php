@@ -28,19 +28,18 @@ class SendBookingReminderJob implements ShouldQueue
         $this->bookingId = $bookingId;
         $this->level = $level;
         $this->targetMinutes = $targetMinutes;
-        $this->onQueue('reminders');
     }
 
     public function handle()
     {
-        DB::transaction(function () {
+        try {
             $booking = Booking::with([
                 'provider.owner:id,fcm_token,first_name,last_name',
                 'serviceman.user:id,fcm_token,first_name,last_name'
-            ])->lockForUpdate()->find($this->bookingId);
+            ])->find($this->bookingId);
 
             if (!$booking) {
-                Log::warning('Booking not found', ['booking_id' => $this->bookingId]);
+                Log::warning('Booking not found for reminder', ['booking_id' => $this->bookingId]);
                 return;
             }
 
@@ -53,54 +52,59 @@ class SendBookingReminderJob implements ShouldQueue
             if ($sentCount > 0) {
                 $this->trackReminder($booking);
 
-                Log::info('Reminder sent via queue', [
+                Log::info('Booking reminder sent via queue', [
                     'booking_id' => $booking->id,
                     'level' => $this->level,
-                    'sent_to' => $sentCount,
-                    'hours' => round($this->targetMinutes / 60, 1)
+                    'sent_to' => $sentCount
                 ]);
             }
-        });
+
+        } catch (\Exception $e) {
+            Log::error('Failed to send booking reminder', [
+                'booking_id' => $this->bookingId,
+                'level' => $this->level,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            throw $e;
+        }
     }
 
     private function shouldSendReminder($booking): bool
     {
-        // Check if already sent this specific level
+        // Check if already sent
         $alreadySent = DB::table('booking_reminders')
             ->where('booking_id', $booking->id)
             ->where('level', $this->level)
             ->exists();
 
         if ($alreadySent) {
+            Log::info('Reminder already sent', [
+                'booking_id' => $booking->id,
+                'level' => $this->level
+            ]);
             return false;
         }
 
-        // Check if booking still active
+        // Check if booking still pending
         if ($booking->booking_status !== 'accepted') {
+            Log::info('Booking no longer pending', [
+                'booking_id' => $booking->id,
+                'status' => $booking->booking_status
+            ]);
             return false;
         }
 
-        // Check time threshold
+        // Check minimum time threshold
         $minutes = $booking->created_at->diffInMinutes(now());
         if ($minutes < $this->targetMinutes) {
+            Log::info('Booking not old enough for reminder', [
+                'booking_id' => $booking->id,
+                'minutes' => $minutes,
+                'required' => $this->targetMinutes
+            ]);
             return false;
-        }
-
-        // For daily intervals (24h+), check if we already sent a reminder today
-        if ($this->targetMinutes >= 1440) {
-            $todayStart = now()->startOfDay();
-            $todaysReminders = DB::table('booking_reminders')
-                ->where('booking_id', $booking->id)
-                ->where('sent_at', '>=', $todayStart)
-                ->exists();
-
-            if ($todaysReminders) {
-                Log::info('Already sent a reminder today', [
-                    'booking_id' => $booking->id,
-                    'level' => $this->level
-                ]);
-                return false;
-            }
         }
 
         return true;
@@ -110,81 +114,87 @@ class SendBookingReminderJob implements ShouldQueue
     {
         $sentCount = 0;
 
-        $title = $this->getNotificationTitle();
+        $title = match ($this->level) {
+            '5_HOURS' => "⏰ Reminder: Booking pending 5 hours",
+            '30_HOURS' => "📋 Reminder: Booking pending 30 hours",
+            '60_HOURS' => "⚠️ Reminder: Booking pending 60 hours",
+            default => "📢 Reminder: Booking pending"
+        };
+
         $description = "Booking #{$booking->readable_id} is still pending. Please take action.";
 
-        // Provider
-        if ($token = $booking->provider?->owner?->fcm_token) {
+        // Send to provider
+        if ($providerFcm = $booking->provider?->owner?->fcm_token) {
             try {
-                device_notification(
-                    $token,
+                $this->sendNotification(
+                    $providerFcm,
                     $title,
                     $description,
-                    null,
-                    $booking->parent_booking_id,
-                    'booking_reminder',
-                    null,
-                    $booking->provider?->id,
-                    null,
-                    null,
-                    null
+                    $booking,
+                    'provider'
                 );
-                $this->logNotification($booking, 'provider', $token, true);
                 $sentCount++;
             } catch (\Exception $e) {
-                $this->logNotification($booking, 'provider', $token, false, $e->getMessage());
-                Log::error('Provider notification failed', [
-                    'booking_id' => $booking->id,
-                    'error' => $e->getMessage()
-                ]);
+                $this->logNotificationError($booking, 'provider', $e->getMessage());
             }
         }
 
-        // Serviceman
-        if ($token = $booking->serviceman?->user?->fcm_token) {
+        // Send to serviceman
+        if ($servicemanFcm = $booking->serviceman?->user?->fcm_token) {
             try {
-                device_notification(
-                    $token,
+                $this->sendNotification(
+                    $servicemanFcm,
                     $title,
                     $description,
-                    null,
-                    $booking->parent_booking_id,
-                    'booking_reminder',
-                    null,
-                    $booking->provider?->id,
-                    null,
-                    null,
-                    null
+                    $booking,
+                    'serviceman'
                 );
-                $this->logNotification($booking, 'serviceman', $token, true);
                 $sentCount++;
             } catch (\Exception $e) {
-                $this->logNotification($booking, 'serviceman', $token, false, $e->getMessage());
-                Log::error('Serviceman notification failed', [
-                    'booking_id' => $booking->id,
-                    'error' => $e->getMessage()
-                ]);
+                $this->logNotificationError($booking, 'serviceman', $e->getMessage());
             }
         }
 
         return $sentCount;
     }
 
-    private function getNotificationTitle(): string
+    private function sendNotification($fcmToken, $title, $description, $booking, $recipientType)
     {
-        $titles = config('reminders.titles', []);
-        return $titles[$this->level] ?? '📢 Reminder: Booking pending';
+        device_notification(
+            $fcmToken,
+            $title,
+            $description,
+            null,
+            $booking->parent_booking_id,
+            'booking_reminder',
+            null,
+            $booking->provider?->id,
+            null,
+            null,
+            null
+        );
+
+        // Log successful notification
+        DB::table('notification_logs')->insert([
+            'booking_id' => $booking->id,
+            'recipient_type' => $recipientType,
+            'level' => $this->level,
+            'fcm_token' => $fcmToken,
+            'success' => true,
+            'sent_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now()
+        ]);
     }
 
-    private function logNotification($booking, $recipientType, $token, $success, $error = null)
+    private function logNotificationError($booking, $recipientType, $errorMessage)
     {
         DB::table('notification_logs')->insert([
             'booking_id' => $booking->id,
             'recipient_type' => $recipientType,
             'level' => $this->level,
-            'fcm_token' => $token,
-            'success' => $success ? 1 : 0,
-            'error_message' => $error,
+            'success' => false,
+            'error_message' => $errorMessage,
             'sent_at' => now(),
             'created_at' => now(),
             'updated_at' => now()

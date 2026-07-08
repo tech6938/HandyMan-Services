@@ -2157,10 +2157,104 @@ trait BookingTrait
      * @param $zoneId
      * @return false|void
      */
-    private function referral_earning_calculation($userId, $zoneId)
+    // private function referral_earning_calculation($userId, $zoneId, $bookingId = null)
+    // {
+    //     // Count only completed service bookings.
+    //     // Parent summary bookings with child rows are excluded so they do not block the first referral payout.
+    //     $completedServiceBookings = Booking::where('customer_id', $userId)
+    //         ->where('booking_status', 'completed')
+    //         ->where(function ($query) {
+    //             $query->whereNotNull('parent_booking_id')
+    //                 ->orWhereDoesntHave('childBookings');
+    //         })
+    //         ->count('id');
+
+    //     $completedServiceBookings += BookingRepeat::whereHas('booking', function ($query) use ($userId) {
+    //         $query->where('customer_id', $userId);
+    //     })->where('booking_status', 'completed')->count('id');
+
+    //     if ($completedServiceBookings > 1) return false;
+
+    //     $referredByUser = User::find($userId)->referred_by_user ?? null;
+    //     if (is_null($referredByUser)) return false;
+
+    //     $customerReferralEarning = business_config('customer_referral_earning', 'customer_config')->live_values ?? 0;
+    //     $amount = business_config('referral_value_per_currency_unit', 'customer_config')->live_values ?? 0;
+
+    //     if ($customerReferralEarning == 1) {
+    //         $afterCommitCallback = function () use ($referredByUser, $amount, $zoneId, $bookingId) {
+    //             referralEarningTransactionAfterBookingComplete($referredByUser, $amount, $bookingId);
+    //             $userRefund  = isNotificationActive(null, 'refer_earn', 'notification', 'user');
+    //             $title = with_currency_symbol($amount) . ' ' . get_push_notification_message('referral_earning', 'customer_notification', $referredByUser?->current_language_key);
+    //             if ($title && $referredByUser?->fcm_token && $userRefund) {
+    //                 device_notification($referredByUser?->fcm_token, $title, null, null, null, 'general', null, $referredByUser?->id);
+    //             }
+
+    //             $pushNotification = new PushNotification();
+    //             $pushNotification->title = translate('You have Earned a Referral Reward!');
+    //             $pushNotification->description = translate("Great news! You have earned a reward for referring a new user, who has now completed their first booking using your code...");
+    //             $pushNotification->to_users = ['customer'];
+    //             $pushNotification->zone_ids = [$zoneId];
+    //             $pushNotification->is_active = 1;
+    //             $pushNotification->cover_image = asset('assets/admin/img/referral_1.png');
+    //             $pushNotification->save();
+
+    //             $pushNotificationUser = new PushNotificationUser();
+    //             $pushNotificationUser->push_notification_id = $pushNotification->id;
+    //             $pushNotificationUser->user_id = $referredByUser->id;
+    //             $pushNotificationUser->save();
+    //         };
+
+    //         // If the booking update is wrapped in a transaction, run the referral credit only after commit
+    //         // so the wallet credit is not lost on a later rollback.
+    //         // DB::afterCommit($afterCommitCallback);
+    //         if (DB::transactionLevel() > 0) {
+    //             DB::afterCommit($afterCommitCallback);
+    //         } else {
+    //             $afterCommitCallback();
+    //         }
+    //     }
+    // }
+
+    private function referral_earning_calculation($userId, $zoneId, $bookingId = null)
     {
-        $isFirstBooking = Booking::where('customer_id', $userId)->count('id');
-        if ($isFirstBooking > 1) return false;
+        // 🛑 PREVENT DUPLICATE PROCESSING FOR THE SAME BOOKING
+        if ($bookingId) {
+            $alreadyProcessed = Transaction::where('booking_id', $bookingId)
+                ->where('trx_type', TRX_TYPE['referral_earning'])
+                ->where('to_user_account', 'user_wallet')
+                ->exists();
+
+            if ($alreadyProcessed) {
+                return false;
+            }
+        }
+
+        // 🛑 PREVENT PROCESSING FOR CHILD BOOKINGS (only parent bookings should trigger referral)
+        if ($bookingId) {
+            $booking = Booking::find($bookingId);
+            if ($booking && !is_null($booking->parent_booking_id)) {
+                return false;
+            }
+        }
+
+        // Count only completed service bookings.
+        // Exclude the current booking if it's being completed to avoid counting it prematurely
+        $completedServiceBookings = Booking::where('customer_id', $userId)
+            ->where('booking_status', 'completed')
+            ->where('id', '!=', $bookingId) // Exclude current booking
+            ->where(function ($query) {
+                $query->whereNotNull('parent_booking_id')
+                    ->orWhereDoesntHave('childBookings');
+            })
+            ->count('id');
+
+        $completedServiceBookings += BookingRepeat::whereHas('booking', function ($query) use ($userId) {
+            $query->where('customer_id', $userId);
+        })->where('booking_status', 'completed')->count('id');
+
+        // ✅ ONLY allow if this is the FIRST completed booking (exactly 0 previous completed bookings)
+        if ($completedServiceBookings > 0) return false;
 
         $referredByUser = User::find($userId)->referred_by_user ?? null;
         if (is_null($referredByUser)) return false;
@@ -2169,26 +2263,38 @@ trait BookingTrait
         $amount = business_config('referral_value_per_currency_unit', 'customer_config')->live_values ?? 0;
 
         if ($customerReferralEarning == 1) {
-            referralEarningTransactionAfterBookingComplete($referredByUser, $amount);
-            $userRefund  = isNotificationActive(null, 'refer_earn', 'notification', 'user');
-            $title = with_currency_symbol($amount) . ' ' . get_push_notification_message('referral_earning', 'customer_notification', $referredByUser?->current_language_key);
-            if ($title && $referredByUser?->fcm_token && $userRefund) {
-                device_notification($referredByUser?->fcm_token, $title, null, null, null, 'general', null, $referredByUser?->id);
+            $afterCommitCallback = function () use ($referredByUser, $amount, $zoneId, $bookingId) {
+                // Pass booking ID to prevent duplicate processing inside transaction
+                referralEarningTransactionAfterBookingComplete($referredByUser, $amount, $bookingId);
+
+                $userRefund = isNotificationActive(null, 'refer_earn', 'notification', 'user');
+                $title = with_currency_symbol($amount) . ' ' . get_push_notification_message('referral_earning', 'customer_notification', $referredByUser?->current_language_key);
+                if ($title && $referredByUser?->fcm_token && $userRefund) {
+                    device_notification($referredByUser?->fcm_token, $title, null, null, null, 'general', null, $referredByUser?->id);
+                }
+
+                $pushNotification = new PushNotification();
+                $pushNotification->title = translate('You have Earned a Referral Reward!');
+                $pushNotification->description = translate("Great news! You have earned a reward for referring a new user, who has now completed their first booking using your code...");
+                $pushNotification->to_users = ['customer'];
+                $pushNotification->zone_ids = [$zoneId];
+                $pushNotification->is_active = 1;
+                $pushNotification->cover_image = asset('assets/admin/img/referral_1.png');
+                $pushNotification->save();
+
+                $pushNotificationUser = new PushNotificationUser();
+                $pushNotificationUser->push_notification_id = $pushNotification->id;
+                $pushNotificationUser->user_id = $referredByUser->id;
+                $pushNotificationUser->save();
+            };
+
+            // If the booking update is wrapped in a transaction, run the referral credit only after commit
+            // so the wallet credit is not lost on a later rollback.
+            if (DB::transactionLevel() > 0) {
+                DB::afterCommit($afterCommitCallback);
+            } else {
+                $afterCommitCallback();
             }
-
-            $pushNotification = new PushNotification();
-            $pushNotification->title = translate('You have Earned a Referral Reward!');
-            $pushNotification->description = translate("Great news! You have earned a reward for referring a new user, who has now completed their first booking using your code...");
-            $pushNotification->to_users = ['customer'];
-            $pushNotification->zone_ids = [$zoneId];
-            $pushNotification->is_active = 1;
-            $pushNotification->cover_image = asset('assets/admin/img/referral_1.png');
-            $pushNotification->save();
-
-            $pushNotificationUser = new PushNotificationUser();
-            $pushNotificationUser->push_notification_id = $pushNotification->id;
-            $pushNotificationUser->user_id = $referredByUser->id;
-            $pushNotificationUser->save();
         }
     }
 
@@ -2272,103 +2378,6 @@ trait BookingTrait
      * @param $bookingAmount
      * @return false|void
      */
-    //  private function loyaltyPointCalculation($userId, $bookingAmount, $referenceId = null, $referenceType = 'booking')
-    // {
-    //     // Get the booking details
-    //     $booking = Booking::find($referenceId);
-
-    //     // CRITICAL: Only process parent bookings (parent_booking_id is NULL)
-    //     // Skip child/repeat bookings completely - no points, no notifications
-    //     if ($booking && !is_null($booking->parent_booking_id)) {
-    //         Log::info('Loyalty Point - Skipping child booking', [
-    //             'user_id' => $userId,
-    //             'child_booking_id' => $referenceId,
-    //             'parent_booking_id' => $booking->parent_booking_id,
-    //             'reason' => 'Loyalty points only for parent bookings'
-    //         ]);
-    //         return true; // Exit silently, no points awarded for child bookings
-    //     }
-
-    //     $customerLoyaltyPoint = business_config('customer_loyalty_point', 'customer_config');
-    //     if (isset($customerLoyaltyPoint) && $customerLoyaltyPoint->live_values != '1') return false;
-
-    //     $percentagePerBooking = business_config('loyalty_point_percentage_per_booking', 'customer_config');
-    //     $pointAmount = ($percentagePerBooking->live_values * $bookingAmount) / 100;
-
-    //     $pointPerCurrencyUnit = business_config('loyalty_point_value_per_currency_unit', 'customer_config');
-
-    //     $point = $pointPerCurrencyUnit->live_values * $pointAmount;
-
-    //     // Only award points for parent bookings
-    //     $isCredited = loyaltyPointTransaction($userId, $point, $referenceId, $referenceType);
-    //     if (!$isCredited) {
-    //         return false;
-    //     }
-
-    //     $user = User::where('id', $userId)->first();
-
-    //     // Check if loyalty point notifications are enabled in admin panel
-    //     $customerNotification = false;
-
-    //     $settings = DB::table('business_settings')
-    //         ->where('key_name', 'loyalty_point')
-    //         ->where('settings_type', 'notification_settings')
-    //         ->first();
-
-    //     if ($settings && $settings->live_values) {
-    //         $values = json_decode($settings->live_values, true);
-    //         if (is_array($values)) {
-    //             $customerNotification = $values['loyalty_point_status'] ?? false;
-    //         }
-    //     }
-
-    //     if (!$customerNotification) {
-    //         $customerNotification = isNotificationActive(null, 'loyalty_point', 'notification', 'user');
-    //     }
-
-    //     $message = get_push_notification_message('loyalty_point', 'customer_notification', $user?->current_language_key);
-    //     $message = (is_string($message) && trim($message) !== '' && $message !== '0')
-    //         ? trim($message)
-    //         : 'loyalty points added to your account';
-
-    //     $formattedPoint = number_format((float) $point, 0, '.', '');
-    //     $title = $formattedPoint . ' ' . ($message ?: 'loyalty points earned');
-    //     $description = 'You earned ' . $formattedPoint . ' loyalty points from booking #' . ($booking?->readable_id ?? $referenceId) . '.';
-
-    //     $dataInfo = [
-    //         'user_name' => $user?->first_name . ' ' . $user?->last_name,
-    //         'points' => $formattedPoint,
-    //         'booking_id' => $referenceId,
-    //         'booking_readable_id' => $booking?->readable_id,
-    //         'transaction_type' => 'loyalty_point_earning'
-    //     ];
-
-    //     // Log::info('Loyalty Point - Parent Booking Processing', [
-    //     //     'user_id' => $userId,
-    //     //     'booking_id' => $referenceId,
-    //     //     'parent_booking_id' => $booking->parent_booking_id ?? 'NULL (Parent)',
-    //     //     'points' => $formattedPoint,
-    //     //     'notification_permission' => $customerNotification
-    //     // ]);
-
-    //     if ($title && $user && $user->is_active && $user->fcm_token && $customerNotification) {
-    //         // Log::info('Sending Loyalty Point Notification', [
-    //         //     'user_id' => $userId,
-    //         //     'points' => $formattedPoint,
-    //         //     'booking_id' => $referenceId,
-    //         //     'booking_readable_id' => $booking?->readable_id
-    //         // ]);
-    //         device_notification($user->fcm_token, $title, $description, null, $referenceId, 'loyalty_point', null, $user->id, $dataInfo);
-    //         return true;
-    //     } else {
-    //         // Log::warning('Loyalty Point Notification NOT sent', [
-    //         //     'user_id' => $userId,
-    //         //     'booking_id' => $referenceId,
-    //         //     'reason' => !$customerNotification ? 'Notification disabled in admin' : 'Missing user/fcm'
-    //         // ]);
-    //         return false;
-    //     }
-    // }
 
     private function loyaltyPointCalculation($userId, $bookingAmount, $referenceId = null, $referenceType = 'booking')
     {

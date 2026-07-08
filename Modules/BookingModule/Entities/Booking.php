@@ -237,7 +237,7 @@ class Booking extends Model
             // *** OLD LOGIC - COMMENTED OUT ***
             // Old logic was: $model->readable_id = $model->count() + 100000;
             // This was problematic because it could cause duplicates
-            
+
             // NEW LOGIC: Generate readable_id in HC format (HC101, HC102, etc.)
             $model->readable_id = generate_booking_readable_id();
         });
@@ -347,7 +347,8 @@ class Booking extends Model
 
 
                     if (!$model->is_guest && $model?->customer) {
-                        $model->referral_earning_calculation($model->customer_id, $model->zone_id);
+                        // Pass the booking id so the referral wallet credit can be tied back to the completed booking.
+                        $model->referral_earning_calculation($model->customer_id, $model->zone_id, $model->id);
 
                         if (is_null($model->parent_booking_id) && $model->childBookings()->exists()) {
                             // Parent summary booking with child services: loyalty is awarded per completed child booking only.
@@ -361,53 +362,6 @@ class Booking extends Model
                     }
 
                     //================ Transactions for Booking ===========Old=====
-
-                    // if ($model?->provider) {
-                    //     if ($model->booking_partial_payments->isNotEmpty()) {
-                    //         if ($model['payment_method'] == 'cash_after_service') {
-                    //             $booking_partial_payment = new BookingPartialPayment;
-                    //             $booking_partial_payment->booking_id = $model->id;
-                    //             $booking_partial_payment->paid_with = 'cash_after_service';
-                    //             $booking_partial_payment->paid_amount = $model->booking_partial_payments->first()?->due_amount;
-                    //             $booking_partial_payment->due_amount = 0;
-                    //             $booking_partial_payment->save();
-
-                    //             completeBookingTransactionForPartialCas($model);
-                    //         } elseif ($model['payment_method'] != 'wallet_payment') {
-                    //             completeBookingTransactionForPartialDigital($model);
-                    //         }
-                    //     } elseif ($model->payment_method == 'cash_after_service') {
-                    //         completeBookingTransactionForCashAfterService($model);
-                    //     } else {
-                    //         if ($model->additional_charge == 0) {
-                    //             completeBookingTransactionForDigitalPayment($model);
-                    //         }
-
-                    //         if ($model->additional_charge > 0) {
-                    //             completeBookingTransactionForDigitalPaymentAndExtraService($model);
-                    //         }
-                    //     }
-
-                    //     $limit_status = provider_warning_amount_calculate($provider->owner->account->account_payable, $provider->owner->account->account_receivable);
-
-                    //     if ($limit_status == '100_percent' && business_config('suspend_on_exceed_cash_limit_provider', 'provider_config')->live_values) {
-                    //         $provider->is_suspended = 1;
-                    //         $provider->save();
-
-                    //         $notification = isNotificationActive($provider?->id, 'transaction', 'notification', 'provider');
-                    //         $title = get_push_notification_message('provider_suspend', 'provider_notification', $provider?->owner?->current_language_key);
-                    //         if ($provider?->owner?->fcm_token && $title && $notification) {
-                    //             device_notification($provider?->owner?->fcm_token, $title, null, null, $model->id, 'suspend', null, $provider->id);
-                    //         }
-
-                    //         try {
-                    //             // Mail::to($provider?->owner?->email)->send(new CashInHandOverflowMail($provider));
-                    //         } catch (\Exception $exception) {
-                    //             info($exception);
-                    //         }
-                    //     }
-                    // }
-                    //================ Transactions for Booking ================
 
                     if ($model?->provider) {
                         // For child bookings, partial payments are stored against the parent booking ID

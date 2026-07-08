@@ -20,6 +20,11 @@ class Kernel extends ConsoleKernel
         // $schedule->command('bookings:send-reminders')
         //     ->everyFiveMinutes()
         //     ->withoutOverlapping();
+        $schedule->command('orders:send-reminders')
+            ->everyFiveMinutes()
+            ->withoutOverlapping()
+            ->runInBackground()
+            ->onOneServer();
     }
 
     /**

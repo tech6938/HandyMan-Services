@@ -206,7 +206,8 @@ class BookingRepeat extends Model
 
 
                     if (!$model?->booking?->is_guest && $model?->booking?->customer) {
-                        $model->referral_earning_calculation($model?->booking?->customer_id, $model?->booking?->zone_id);
+                        // Pass the repeat booking id so the referral credit can be traced to the completed repeat booking.
+                        $model->referral_earning_calculation($model?->booking?->customer_id, $model?->booking?->zone_id, $model->id);
 
                         $model->loyaltyPointCalculation($model?->booking?->customer_id, $model->total_booking_amount, $model->id, 'booking_repeat');
 
