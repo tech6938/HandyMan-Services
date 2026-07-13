@@ -431,7 +431,8 @@
                                                                 data-service_img="{{ $review->service->cover_image_full_path }}"
                                                                 data-review="{{ $review->review_comment ?? translate('No review yet') }}"
                                                                 data-review_reply="{{ $review->reviewReply?->reply ?? translate('No reply yet') }}"
-                                                                data-variant_key="{{ $review->booking?->detail[0]?->variant_key }}">
+                                                                {{-- data-variant_key="{{ $review->booking?->detail[0]?->variant_key }}"> --}}
+                                                                data-variant_key="{{ $review->booking?->detail->first()?->variant_key ?? '' }}">
                                                                 <span class="material-icons">visibility</span>
                                                             </button>
                                                         </div>

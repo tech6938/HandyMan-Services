@@ -960,52 +960,6 @@ class ServiceController extends Controller
      * @param string $subCategoryId
      * @return JsonResponse
      */
-    // public function servicesBySubcategory(Request $request, string $subCategoryId): JsonResponse
-    // {
-    //     $validator = Validator::make($request->all(), [
-    //         'limit' => 'required|numeric|min:1|max:200',
-    //         'offset' => 'required|numeric|min:1|max:100000'
-    //     ]);
-
-    //     if ($validator->fails()) {
-    //         return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
-    //     }
-
-    //     $servicesQuery = $this->service
-    //         ->with(['category.zonesBasicInfo', 'variations', 'service_discount', 'category.category_discount'])
-    //         ->where('sub_category_id', $subCategoryId)
-    //         ->where('is_active', 1)
-    //         ->where(function ($query) {
-    //             $query->whereDoesntHave('service_discount')
-    //                 ->orWhereHas('service_discount')
-    //                 ->orWhere(function ($query) {
-    //                     $query->whereDoesntHave('category.category_discount')
-    //                         ->orWhereHas('category.category_discount');
-    //                 });
-    //         })
-    //         ->latest();
-
-    //     $services = $servicesQuery
-    //         ->paginate($request['limit'], ['*'], 'offset', $request['offset'])
-    //         ->withPath('');
-
-    //     foreach ($services as $service) {
-    //         $service['is_favorite'] = $this->favoriteService->where('customer_user_id', $this->customer_user_id)->where('service_id', $service->id)->exists() ? 1 : 0;
-    //     }
-
-    //     if (count($services) > 0) {
-    //         $authUser = auth('api')->user();
-    //         if ($authUser) {
-    //             $recentView = $this->recentView->firstOrNew(['sub_category_id' => $subCategoryId, 'user_id' => $authUser->id]);
-    //             $recentView->total_sub_category_view += 1;
-    //             $recentView->save();
-    //         }
-
-    //         return response()->json(response_formatter(DEFAULT_200, self::variationMapper($services)), 200);
-    //     }
-
-    //     return response()->json(response_formatter(DEFAULT_204), 200);
-    // }
 
     public function servicesBySubcategory(Request $request, string $subCategoryId): JsonResponse
     {

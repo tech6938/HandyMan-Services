@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Modules\ServiceManagement\Entities\FavoriteService;
 use Modules\ServiceManagement\Entities\Service;
@@ -39,7 +40,7 @@ class FavoriteServiceController extends Controller
         }
 
         $services = $this->service->with(['category.zonesBasicInfo', 'variations'])
-            ->whereHas('favorites', function($query){
+            ->whereHas('favorites', function ($query) {
                 $query->where('customer_user_id', auth('api')->user()->id);
             })
             ->active()->latest()
@@ -63,12 +64,12 @@ class FavoriteServiceController extends Controller
             return response()->json(response_formatter(DEFAULT_400, null, error_processor($validator)), 400);
         }
 
-        $favorite = $this->favoriteService->where('customer_user_id',$request->user()->id)->where('service_id', $request->service_id)->first();
+        $favorite = $this->favoriteService->where('customer_user_id', $request->user()->id)->where('service_id', $request->service_id)->first();
 
-        if ($favorite){
+        if ($favorite) {
             $favorite->delete();
             $status = 0;
-        }else {
+        } else {
             $favorite = $this->favoriteService;
             $favorite->customer_user_id = $request->user()->id;
             $favorite->service_id = $request->service_id;
@@ -76,9 +77,9 @@ class FavoriteServiceController extends Controller
             $status = 1;
         }
 
-        if($status){
+        if ($status) {
             return response()->json(response_formatter(SERVICE_ADD_TO_FAVORITE_200,  ['status' => $status]), 200);
-        }else{
+        } else {
             return response()->json(response_formatter(SERVICE_REMOVE_FAVORITE_200,  ['status' => $status]), 200);
         }
     }
@@ -89,11 +90,11 @@ class FavoriteServiceController extends Controller
      * @param int $id
      * @return JsonResponse
      */
-    public function destroy(Request $request ,$id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
-        $favorite = $this->favoriteService->where('customer_user_id',$request->user()->id)->where('service_id',$id)->first();
+        $favorite = $this->favoriteService->where('customer_user_id', $request->user()->id)->where('service_id', $id)->first();
 
-        if ($favorite){
+        if ($favorite) {
 
             $favorite->delete();
 
@@ -103,28 +104,91 @@ class FavoriteServiceController extends Controller
         return response()->json(response_formatter(DEFAULT_404), 400);
     }
 
+    // private function variationMapper($services)
+    // {
+    //     $services->map(function ($service) {
+    //         $service['variations_app_format'] = self::variationsAppFormat($service);
+    //         return $service;
+    //     });
+    //     return $services;
+    // }
+
+    // private function variationsAppFormat($service): array
+    // {
+    //     $formatting = [];
+    //     $filtered = $service['variations']->where('zone_id', Config::get('zone_id'));
+    //     $formatting['zone_id'] = Config::get('zone_id');
+    //     $formatting['default_price'] = $filtered->first() ? $filtered->first()->price : 0;
+    //     foreach ($filtered as $data) {
+    //         $formatting['zone_wise_variations'][] = [
+    //             'variant_key' => $data['variant_key'],
+    //             'variant_name' => $data['variant'],
+    //             'price' => $data['price']
+    //         ];
+    //     }
+    //     return $formatting;
+    // }
+
     private function variationMapper($services)
     {
-        $services->map(function ($service) {
-            $service['variations_app_format'] = self::variationsAppFormat($service);
+        $serviceIds = $services->pluck('id')->toArray();
+
+        // ✅ Get variant ratings
+        $variantRatingMap = \Modules\ReviewModule\Entities\Review::whereIn('service_id', $serviceIds)
+            ->select(
+                'service_id',
+                'variant_id',
+                DB::raw('AVG(review_rating) as average_rating'),
+                DB::raw('COUNT(*) as review_count')
+            )
+            ->groupBy('service_id', 'variant_id')
+            ->get()
+            ->groupBy('service_id')
+            ->map(function ($group) {
+                return $group->keyBy('variant_id')->map(function ($item) {
+                    return [
+                        'average_rating' => round($item->average_rating, 2),
+                        'review_count' => (int) $item->review_count,
+                    ];
+                });
+            });
+
+        $services->map(function ($service) use ($variantRatingMap) {
+            $variantRatings = $variantRatingMap->has($service->id)
+                ? $variantRatingMap->get($service->id)
+                : collect();
+            $service['variations_app_format'] = self::variationsAppFormat($service, $variantRatings);
             return $service;
         });
+
         return $services;
     }
 
-    private function variationsAppFormat($service): array
+    private function variationsAppFormat($service, $variantRatings = null): array
     {
+        $variantRatings = $variantRatings ?? collect();
         $formatting = [];
         $filtered = $service['variations']->where('zone_id', Config::get('zone_id'));
+
         $formatting['zone_id'] = Config::get('zone_id');
         $formatting['default_price'] = $filtered->first() ? $filtered->first()->price : 0;
+        $formatting['default_service_img'] = $filtered->first() ? $filtered->first()->service_img_full_path : null;
+
         foreach ($filtered as $data) {
+            $variantRating = $variantRatings->has($data->id)
+                ? $variantRatings->get($data->id)
+                : ['average_rating' => 0, 'review_count' => 0];
+
             $formatting['zone_wise_variations'][] = [
                 'variant_key' => $data['variant_key'],
                 'variant_name' => $data['variant'],
-                'price' => $data['price']
+                'price' => $data['price'],
+                'service_img' => $data['service_img_full_path'],
+                'variant_avg_rating' => $variantRating['average_rating'],
+                'variant_review_count' => $variantRating['review_count'],
             ];
         }
+
         return $formatting;
     }
 }
